@@ -4,11 +4,7 @@
   --fm: 'JetBrains Mono', monospace;
 }
 
-* {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
-}
+* { box-sizing: border-box; margin: 0; padding: 0; }
 
 body {
   font-family: 'Nunito', sans-serif;
@@ -21,38 +17,17 @@ body {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #ddd; border-radius: 4px; }
 
-@keyframes mIn {
-  from { opacity: 0; transform: translateY(12px) scale(0.97); }
-  to { opacity: 1; transform: none; }
-}
-@keyframes fUp {
-  from { opacity: 0; transform: translateY(5px); }
-  to { opacity: 1; transform: none; }
-}
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.6; }
-}
-@keyframes slideR {
-  from { opacity: 0; transform: translateX(12px); }
-  to { opacity: 1; transform: none; }
-}
+@keyframes mIn { from { opacity: 0; transform: translateY(12px) scale(0.97); } to { opacity: 1; transform: none; } }
+@keyframes fUp { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
+@keyframes slideR { from { opacity: 0; transform: translateX(12px); } to { opacity: 1; transform: none; } }
 
 input:focus, select:focus, textarea:focus {
   border-color: #6366f1 !important;
   box-shadow: 0 0 0 3px rgba(99,102,241,0.1);
 }
 
-button {
-  font-family: 'Nunito', sans-serif;
-}
-
-/* PWA - safe area for mobile notch */
-@supports (padding: env(safe-area-inset-top)) {
-  header {
-    padding-top: calc(10px + env(safe-area-inset-top));
-  }
-}
+button { font-family: 'Nunito', sans-serif; }
 
 @media (max-width: 640px) {
   .desk { display: none !important; }
