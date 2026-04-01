@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   supabase,
   getProcesses,
@@ -22,15 +22,17 @@ const isToday = (d: string | null) => d === today();
 const isTomorrow = (d: string | null) => d === tomorrow();
 const isUrgent = (d: string | null) => isToday(d) || isTomorrow(d);
 const isPast = (d: string | null) => { if (!d) return false; return d < today(); };
+
 const STAGES: { key: Stage; label: string; icon: string; color: string; bg: string }[] = [
   { key: "sem_container", label: "Sem Container", icon: "📭", color: "#dc2626", bg: "#fef2f2" },
   { key: "contato_terminal", label: "Contato Terminal", icon: "📞", color: "#7c3aed", bg: "#f5f3ff" },
   { key: "aguardando", label: "Aguard. Estratégia", icon: "⏳", color: "#db2777", bg: "#fdf2f8" },
   { key: "liberado", label: "Liberado", icon: "✅", color: "#059669", bg: "#ecfdf5" },
-  { key: "concluido", label: "Concluído", icon: "📦", color: "#0284c7", bg: "#f0f9ff" },
 ];
+
 const CTYPES = ["20' Dry","40' Dry","40' HC","20' Reefer","40' Reefer","20' OT","40' OT","20' FR","40' FR"];
 interface AppUser { email: string; name: string; role: "admin" | "user"; }
+interface DBUser { id: string; email: string; name: string; role: string; password_hash: string; }
 const fd = (d: string | null) => { if (!d) return "—"; return new Date(d + "T12:00:00").toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit" }); };
 const ff = (d: string | null) => { if (!d) return "—"; return new Date(d + "T12:00:00").toLocaleDateString("pt-BR"); };
 const ago = (iso: string) => { const m = Math.floor((Date.now() - new Date(iso).getTime()) / 60000); if (m < 1) return "agora"; if (m < 60) return m+"min"; const h = Math.floor(m / 60); if (h < 24) return h+"h"; return Math.floor(h / 24)+"d"; };
@@ -50,6 +52,10 @@ const IChev = ({ d = "down" }: { d?: string }) => <svg width="14" height="14" vi
 const IMenu = () => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>;
 const IShield = () => <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>;
 const ITimer = () => <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2"/><path d="M5 3L2 6"/><path d="M22 6l-3-3"/><line x1="12" y1="1" x2="12" y2="3"/></svg>;
+const IRefresh = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>;
+const IUsers = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>;
+const IUpload = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>;
+const IGear = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/></svg>;
 
 const ip: React.CSSProperties = { width: "100%", padding: "10px 14px", fontSize: 14, border: "2px solid #e2e2ea", borderRadius: 10, background: "#fff", color: "#1a1a2e", outline: "none", fontFamily: "'Nunito',sans-serif", boxSizing: "border-box", fontWeight: 600 };
 const sl: React.CSSProperties = { ...ip, cursor: "pointer" };
@@ -62,13 +68,74 @@ function Fl({ label, children, span }: { label: string; children: React.ReactNod
   return (<div style={{ gridColumn: span ? "1/-1" : undefined }}><label style={{ display: "block", fontSize: 11, fontWeight: 800, color: "#555", marginBottom: 5, textTransform: "uppercase", letterSpacing: ".06em" }}>{label}</label>{children}</div>);
 }
 
-function LoginScreen({ onLogin }: { onLogin: (u: AppUser) => void }) {
+/* ═══ LOGIN ═══ */
+function LoginScreen({ onLogin, logo }: { onLogin: (u: AppUser) => void; logo: string | null }) {
   const [email, setEmail] = useState(""); const [pass, setPass] = useState(""); const [err, setErr] = useState(""); const [loading, setLoading] = useState(false); const [show, setShow] = useState(false);
   useEffect(() => { setTimeout(() => setShow(true), 80); }, []);
   const go = async () => { setLoading(true); setErr(""); try { const { data, error } = await supabase.from("users").select("*").eq("email", email.trim().toLowerCase()).eq("password_hash", pass).single(); if (error || !data) setErr("E-mail ou senha incorretos"); else onLogin({ email: data.email, name: data.name, role: data.role }); } catch { setErr("Erro de conexão"); } setLoading(false); };
-  return (<div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "linear-gradient(155deg,#f2f4f8,#eaecf5,#f5f1f8)" }}><div style={{ width: "100%", maxWidth: 400, background: "#fff", borderRadius: 24, padding: "44px 40px", boxShadow: "0 20px 60px rgba(0,0,0,0.08)", opacity: show ? 1 : 0, transform: show ? "none" : "translateY(16px)", transition: "all .5s cubic-bezier(.16,1,.3,1)", margin: 16 }}><div style={{ textAlign: "center", marginBottom: 32 }}><div style={{ fontSize: 30, fontWeight: 900, letterSpacing: "-.04em", color: "#1a1a2e" }}>Inter<span style={{ color: "#6366f1" }}>ação</span></div><p style={{ fontSize: 13, color: "#999", marginTop: 6 }}>Controle de Liberação de Contêineres</p></div><div style={{ marginBottom: 16 }}><label style={{ display: "block", fontSize: 11, fontWeight: 800, color: "#555", marginBottom: 5, textTransform: "uppercase" }}>E-mail</label><input value={email} onChange={e => setEmail(e.target.value)} onKeyDown={e => e.key === "Enter" && go()} placeholder="seu@email.com" style={{ ...ip, padding: "12px 16px" }} /></div><div style={{ marginBottom: 8 }}><label style={{ display: "block", fontSize: 11, fontWeight: 800, color: "#555", marginBottom: 5, textTransform: "uppercase" }}>Senha</label><input type="password" value={pass} onChange={e => setPass(e.target.value)} onKeyDown={e => e.key === "Enter" && go()} placeholder="••••••••" style={{ ...ip, padding: "12px 16px" }} /></div>{err && <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "10px 14px", borderRadius: 10, background: "#fef2f2", color: "#dc2626", fontSize: 13, fontWeight: 700, marginTop: 12 }}><IAlert />{err}</div>}<button onClick={go} disabled={loading} style={{ width: "100%", padding: "14px", borderRadius: 12, border: "none", marginTop: 18, background: "linear-gradient(135deg,#6366f1,#8b5cf6)", color: "#fff", fontSize: 15, fontWeight: 800, cursor: loading ? "wait" : "pointer", opacity: loading ? 0.7 : 1, boxShadow: "0 6px 24px rgba(99,102,241,0.3)" }}>{loading ? "Entrando..." : "Entrar"}</button><p style={{ textAlign: "center", fontSize: 11, color: "#ccc", marginTop: 20 }}>Inter Shipping © {new Date().getFullYear()}</p></div></div>);
+  return (<div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "linear-gradient(155deg,#f2f4f8,#eaecf5,#f5f1f8)" }}><div style={{ width: "100%", maxWidth: 400, background: "#fff", borderRadius: 24, padding: "44px 40px", boxShadow: "0 20px 60px rgba(0,0,0,0.08)", opacity: show ? 1 : 0, transform: show ? "none" : "translateY(16px)", transition: "all .5s cubic-bezier(.16,1,.3,1)", margin: 16 }}><div style={{ textAlign: "center", marginBottom: 32 }}>{logo ? <img src={logo} alt="Logo" style={{ maxHeight: 60, maxWidth: 240, objectFit: "contain", marginBottom: 10 }} /> : <div style={{ fontSize: 30, fontWeight: 900, letterSpacing: "-.04em", color: "#1a1a2e" }}>Inter<span style={{ color: "#6366f1" }}>ação</span></div>}<p style={{ fontSize: 13, color: "#999", marginTop: 6 }}>Controle de Liberação de Contêineres</p></div><div style={{ marginBottom: 16 }}><label style={{ display: "block", fontSize: 11, fontWeight: 800, color: "#555", marginBottom: 5, textTransform: "uppercase" }}>E-mail</label><input value={email} onChange={e => setEmail(e.target.value)} onKeyDown={e => e.key === "Enter" && go()} placeholder="seu@email.com" style={{ ...ip, padding: "12px 16px" }} /></div><div style={{ marginBottom: 8 }}><label style={{ display: "block", fontSize: 11, fontWeight: 800, color: "#555", marginBottom: 5, textTransform: "uppercase" }}>Senha</label><input type="password" value={pass} onChange={e => setPass(e.target.value)} onKeyDown={e => e.key === "Enter" && go()} placeholder="••••••••" style={{ ...ip, padding: "12px 16px" }} /></div>{err && <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "10px 14px", borderRadius: 10, background: "#fef2f2", color: "#dc2626", fontSize: 13, fontWeight: 700, marginTop: 12 }}><IAlert />{err}</div>}<button onClick={go} disabled={loading} style={{ width: "100%", padding: "14px", borderRadius: 12, border: "none", marginTop: 18, background: "linear-gradient(135deg,#6366f1,#8b5cf6)", color: "#fff", fontSize: 15, fontWeight: 800, cursor: loading ? "wait" : "pointer", opacity: loading ? 0.7 : 1, boxShadow: "0 6px 24px rgba(99,102,241,0.3)" }}>{loading ? "Entrando..." : "Entrar"}</button><p style={{ textAlign: "center", fontSize: 11, color: "#ccc", marginTop: 20 }}>Inter Shipping © {new Date().getFullYear()}</p></div></div>);
 }
 
+/* ═══ ADMIN PANEL ═══ */
+function AdminPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [users, setUsers] = useState<DBUser[]>([]);
+  const [newEmail, setNewEmail] = useState(""); const [newName, setNewName] = useState(""); const [newPass, setNewPass] = useState(""); const [newRole, setNewRole] = useState("user");
+  const [msg, setMsg] = useState(""); const [loading, setLoading] = useState(false);
+
+  const loadUsers = async () => { const { data } = await supabase.from("users").select("*").order("name"); if (data) setUsers(data); };
+  useEffect(() => { if (open) loadUsers(); }, [open]);
+
+  const addUser = async () => {
+    if (!newEmail || !newName || !newPass) { setMsg("Preencha todos os campos"); return; }
+    setLoading(true); setMsg("");
+    const { error } = await supabase.from("users").insert({ email: newEmail.trim().toLowerCase(), name: newName.trim(), password_hash: newPass, role: newRole });
+    if (error) { setMsg(error.message.includes("duplicate") ? "E-mail já cadastrado" : "Erro: " + error.message); }
+    else { setMsg("✅ Usuário criado!"); setNewEmail(""); setNewName(""); setNewPass(""); setNewRole("user"); loadUsers(); }
+    setLoading(false);
+  };
+
+  const removeUser = async (id: string, name: string) => {
+    if (!confirm(`Remover ${name}?`)) return;
+    await supabase.from("users").delete().eq("id", id);
+    loadUsers();
+  };
+
+  return (
+    <Modal open={open} onClose={onClose} title="👥 Gerenciar Usuários" w={520}>
+      {/* User list */}
+      <div style={{ marginBottom: 20 }}>
+        <div style={{ fontSize: 12, fontWeight: 800, color: "#888", textTransform: "uppercase", marginBottom: 8 }}>Usuários cadastrados ({users.length})</div>
+        {users.map(u => (
+          <div key={u.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", borderRadius: 10, background: "#f8f8fc", marginBottom: 6, border: "1px solid #eee" }}>
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: "#1a1a2e", display: "flex", alignItems: "center", gap: 6 }}>
+                {u.name}
+                {u.role === "admin" && <span style={{ fontSize: 9, fontWeight: 900, color: "#f59e0b", background: "#fffbeb", padding: "1px 6px", borderRadius: 4 }}>ADMIN</span>}
+              </div>
+              <div style={{ fontSize: 12, color: "#888" }}>{u.email}</div>
+            </div>
+            <button onClick={() => removeUser(u.id, u.name)} style={{ background: "#fef2f2", border: "1px solid #fecaca", color: "#ef4444", cursor: "pointer", padding: "5px 7px", borderRadius: 7, display: "flex" }}><ITrash /></button>
+          </div>
+        ))}
+      </div>
+
+      {/* Add user form */}
+      <div style={{ borderTop: "2px solid #f0f0f4", paddingTop: 16 }}>
+        <div style={{ fontSize: 12, fontWeight: 800, color: "#888", textTransform: "uppercase", marginBottom: 10 }}>Adicionar novo usuário</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px 12px" }}>
+          <div><label style={{ fontSize: 10, fontWeight: 700, color: "#999", display: "block", marginBottom: 3 }}>NOME</label><input value={newName} onChange={e => setNewName(e.target.value)} placeholder="Nome completo" style={ip} /></div>
+          <div><label style={{ fontSize: 10, fontWeight: 700, color: "#999", display: "block", marginBottom: 3 }}>E-MAIL</label><input value={newEmail} onChange={e => setNewEmail(e.target.value)} placeholder="email@empresa.com" style={ip} /></div>
+          <div><label style={{ fontSize: 10, fontWeight: 700, color: "#999", display: "block", marginBottom: 3 }}>SENHA</label><input value={newPass} onChange={e => setNewPass(e.target.value)} placeholder="Senha" style={ip} /></div>
+          <div><label style={{ fontSize: 10, fontWeight: 700, color: "#999", display: "block", marginBottom: 3 }}>PAPEL</label><select value={newRole} onChange={e => setNewRole(e.target.value)} style={sl}><option value="user">Operacional</option><option value="admin">Admin</option></select></div>
+        </div>
+        {msg && <div style={{ marginTop: 10, padding: "8px 12px", borderRadius: 8, background: msg.startsWith("✅") ? "#ecfdf5" : "#fef2f2", color: msg.startsWith("✅") ? "#059669" : "#dc2626", fontSize: 13, fontWeight: 700 }}>{msg}</div>}
+        <button onClick={addUser} disabled={loading} style={{ marginTop: 12, padding: "10px 24px", borderRadius: 10, background: "linear-gradient(135deg,#6366f1,#8b5cf6)", border: "none", color: "#fff", fontSize: 13, fontWeight: 800, cursor: "pointer", boxShadow: "0 4px 16px rgba(99,102,241,.25)" }}>{loading ? "Criando..." : "Criar Usuário"}</button>
+      </div>
+    </Modal>
+  );
+}
+
+/* ═══ PROCESS CARD ═══ */
 function ProcessCard({ card, stgData, onEdit, onDelete, onChangeStage, autoMin }: { card: ContainerProcess; stgData: typeof STAGES[0]; onEdit: (c: ContainerProcess) => void; onDelete: (id: string) => void; onChangeStage: (id: string, s: Stage) => void; autoMin: number | null; }) {
   const [open, setOpen] = useState(false);
   const past = isPast(card.data_retirada); const todayFlag = isToday(card.data_retirada); const tomorrowFlag = isTomorrow(card.data_retirada);
@@ -83,8 +150,8 @@ function ProcessCard({ card, stgData, onEdit, onDelete, onChangeStage, autoMin }
       <span style={{ fontSize: 13, fontWeight: 800, color: "#1a1a2e", background: "#f0f0f5", padding: "3px 10px", borderRadius: 6, flexShrink: 0 }}>{card.quantidade}× {card.tipo_container}</span>
       {card.transportadora && <span style={{ fontSize: 13, fontWeight: 700, color: "#444", flexShrink: 0 }}>🚛 {card.transportadora}</span>}
       {card.data_retirada && <span style={{ fontSize: 14, fontWeight: 900, color: dColor, fontFamily: "var(--fm)", flexShrink: 0, background: (past || todayFlag) ? "#fee2e2" : tomorrowFlag ? "#fff7ed" : "#f5f5f5", padding: "4px 10px", borderRadius: 7, border: (past || todayFlag) ? "1px solid #fca5a5" : "none" }}>📅 {fd(card.data_retirada)}</span>}
-      {card.data_carregamento && <span style={{ fontSize: 12, fontWeight: 700, color: dColorC, fontFamily: "var(--fm)", flexShrink: 0, background: "#f0f5ff", padding: "3px 8px", borderRadius: 6 }}>🚢 {fd(card.data_carregamento)}{dLabelC && <span style={{ fontSize: 9, fontWeight: 900, marginLeft: 4, color: dColorC }}>{dLabelC}</span>}</span>}
-      {card.stage === "liberado" && autoMin !== null && <span style={{ fontSize: 11, color: "#059669", fontFamily: "var(--fm)", background: "#ecfdf5", padding: "3px 8px", borderRadius: 6, fontWeight: 800, flexShrink: 0, display: "flex", alignItems: "center", gap: 3 }}><ITimer />{autoMin > 60 ? `${Math.floor(autoMin / 60)}h${autoMin % 60}m` : `${autoMin}min`}</span>}
+      {card.data_carregamento && <span style={{ fontSize: 12, fontWeight: 700, color: dColorC, fontFamily: "var(--fm)", flexShrink: 0, background: "#f0f5ff", padding: "3px 8px", borderRadius: 6 }}>🚢 {fd(card.data_carregamento)}{dLabelC && <span style={{ fontSize: 9, fontWeight: 900, marginLeft: 4 }}>{dLabelC}</span>}</span>}
+      {card.stage === "liberado" && autoMin !== null && <span style={{ fontSize: 11, color: "#059669", fontFamily: "var(--fm)", background: "#ecfdf5", padding: "3px 8px", borderRadius: 6, fontWeight: 800, flexShrink: 0, display: "flex", alignItems: "center", gap: 3 }}><ITimer />Excluir em {autoMin > 60 ? `${Math.floor(autoMin / 60)}h${autoMin % 60}m` : `${autoMin}min`}</span>}
       {card.referencia && <span style={{ fontSize: 12, fontWeight: 700, color: "#888", fontFamily: "var(--fm)", flexShrink: 0 }}>REF: {card.referencia}</span>}
       <div style={{ marginLeft: "auto", flexShrink: 0, display: "flex", alignItems: "center", gap: 6 }}>
         <button onClick={e => { e.stopPropagation(); onEdit(card); }} style={{ background: "#f0eeff", border: "1px solid #ddd8ff", color: "#6366f1", cursor: "pointer", padding: "6px 8px", borderRadius: 8, display: "flex" }} title="Editar"><IEdit /></button>
@@ -108,6 +175,7 @@ function ProcessCard({ card, stgData, onEdit, onDelete, onChangeStage, autoMin }
   </div>);
 }
 
+/* ═══ MAIN ═══ */
 export default function Page() {
   const [user, setUser] = useState<AppUser | null>(null);
   const [cards, setCards] = useState<ContainerProcess[]>([]);
@@ -121,8 +189,25 @@ export default function Page() {
   const [filterDate, setFilterDate] = useState("todos");
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [showLog, setShowLog] = useState(false);
+  const [showAdmin, setShowAdmin] = useState(false);
   const [mobileMenu, setMobileMenu] = useState(false);
   const [, setTick] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
+  const [logo, setLogo] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  // Load logo from localStorage
+  useEffect(() => { try { const l = window.localStorage?.getItem("interacao-logo"); if (l) setLogo(l); } catch {} }, []);
+  const handleLogo = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0]; if (!f) return;
+    const r = new FileReader(); r.onload = ev => { const d = ev.target?.result as string; setLogo(d); try { window.localStorage?.setItem("interacao-logo", d); } catch {} }; r.readAsDataURL(f);
+  };
+
+  const refresh = async () => {
+    setRefreshing(true);
+    try { const [p, a] = await Promise.all([getProcesses(), getActivity()]); setCards(p); setActivityList(a); } catch (e) { console.error(e); }
+    setTimeout(() => setRefreshing(false), 500);
+  };
 
   useEffect(() => {
     if (!user) return; let m = true;
@@ -167,23 +252,26 @@ export default function Page() {
   const urgentCount = cards.filter(c => isUrgent(c.data_retirada) || isPast(c.data_retirada)).length;
   const isAdmin = user?.role === "admin";
 
-  if (!user) return <LoginScreen onLogin={setUser} />;
+  if (!user) return <LoginScreen onLogin={setUser} logo={logo} />;
   if (loading) return (<div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#f4f5f9" }}><div style={{ textAlign: "center" }}><div style={{ fontSize: 40, marginBottom: 12 }}>📦</div><p style={{ color: "#999", fontWeight: 700, fontSize: 16 }}>Carregando...</p></div></div>);
 
   return (
     <div style={{ minHeight: "100vh", background: "#f2f3f8" }}>
+      <input ref={fileRef} type="file" accept="image/*" onChange={handleLogo} style={{ display: "none" }} />
       <header style={{ background: "#fff", borderBottom: "2px solid #eeeef2", padding: "12px 20px", position: "sticky", top: 0, zIndex: 100 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <div style={{ width: 40, height: 40, borderRadius: 12, background: "linear-gradient(135deg,#6366f1,#a855f7)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 18, boxShadow: "0 4px 16px rgba(99,102,241,.25)" }}>📦</div>
+            {logo ? <img src={logo} alt="Logo" style={{ height: 38, maxWidth: 160, objectFit: "contain", cursor: "pointer" }} onClick={() => fileRef.current?.click()} title="Trocar logo" /> : <div onClick={() => fileRef.current?.click()} style={{ width: 40, height: 40, borderRadius: 12, background: "linear-gradient(135deg,#6366f1,#a855f7)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 14, boxShadow: "0 4px 16px rgba(99,102,241,.25)", cursor: "pointer" }} title="Adicionar logo"><IUpload /></div>}
             <div><h1 style={{ fontSize: 20, fontWeight: 900, letterSpacing: "-.03em", lineHeight: 1 }}>Inter<span style={{ color: "#6366f1" }}>ação</span></h1><p style={{ fontSize: 11, color: "#888", fontWeight: 700 }}>{cards.length} processos · {totalC} cnt{urgentCount > 0 && <span style={{ color: "#dc2626", fontWeight: 900 }}> · ⚠️ {urgentCount} urgente{urgentCount > 1 ? "s" : ""}</span>}</p></div>
           </div>
-          <div className="desk" style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <div style={{ position: "relative" }}><div style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "#bbb" }}><ISearch /></div><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar exportador, reserva..." style={{ ...ip, width: 280, paddingLeft: 34, fontSize: 13, padding: "8px 12px 8px 34px", borderRadius: 10, background: "#f7f7fb", border: "2px solid #e8e8ee" }} /></div>
-            <button onClick={() => setShowLog(!showLog)} style={{ display: "flex", alignItems: "center", gap: 4, padding: "8px 14px", borderRadius: 10, background: showLog ? "#f0eeff" : "#fff", border: "2px solid #e8e8ee", color: showLog ? "#6366f1" : "#888", fontSize: 12, fontWeight: 800, cursor: "pointer" }}><ILog />Log</button>
-            <button onClick={exportCSV} style={{ display: "flex", alignItems: "center", gap: 4, padding: "8px 14px", borderRadius: 10, background: "#fff", border: "2px solid #e8e8ee", color: "#888", fontSize: 12, fontWeight: 800, cursor: "pointer" }}><IDown />CSV</button>
-            <button onClick={openNew} style={{ display: "flex", alignItems: "center", gap: 4, padding: "8px 18px", borderRadius: 10, background: "linear-gradient(135deg,#6366f1,#8b5cf6)", border: "none", color: "#fff", fontSize: 13, fontWeight: 800, cursor: "pointer", boxShadow: "0 4px 16px rgba(99,102,241,.3)" }}><IPlus />Novo Processo</button>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 12px 6px 10px", borderRadius: 10, background: "#f7f7fb", border: "2px solid #e8e8ee" }}>
+          <div className="desk" style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <div style={{ position: "relative" }}><div style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "#bbb" }}><ISearch /></div><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar exportador, reserva..." style={{ ...ip, width: 240, paddingLeft: 34, fontSize: 13, padding: "8px 12px 8px 34px", borderRadius: 10, background: "#f7f7fb", border: "2px solid #e8e8ee" }} /></div>
+            <button onClick={refresh} title="Atualizar dados" style={{ display: "flex", alignItems: "center", padding: "8px", borderRadius: 10, background: "#fff", border: "2px solid #e8e8ee", color: refreshing ? "#6366f1" : "#888", cursor: "pointer", transition: ".3s", transform: refreshing ? "rotate(360deg)" : "none" }}><IRefresh /></button>
+            <button onClick={() => setShowLog(!showLog)} style={{ display: "flex", alignItems: "center", gap: 4, padding: "8px 12px", borderRadius: 10, background: showLog ? "#f0eeff" : "#fff", border: "2px solid #e8e8ee", color: showLog ? "#6366f1" : "#888", fontSize: 12, fontWeight: 800, cursor: "pointer" }}><ILog />Log</button>
+            <button onClick={exportCSV} style={{ display: "flex", alignItems: "center", gap: 4, padding: "8px 12px", borderRadius: 10, background: "#fff", border: "2px solid #e8e8ee", color: "#888", fontSize: 12, fontWeight: 800, cursor: "pointer" }}><IDown />CSV</button>
+            {isAdmin && <button onClick={() => setShowAdmin(true)} style={{ display: "flex", alignItems: "center", gap: 4, padding: "8px 12px", borderRadius: 10, background: "#fffbeb", border: "2px solid #fde68a", color: "#d97706", fontSize: 12, fontWeight: 800, cursor: "pointer" }}><IUsers />Usuários</button>}
+            <button onClick={openNew} style={{ display: "flex", alignItems: "center", gap: 4, padding: "8px 16px", borderRadius: 10, background: "linear-gradient(135deg,#6366f1,#8b5cf6)", border: "none", color: "#fff", fontSize: 13, fontWeight: 800, cursor: "pointer", boxShadow: "0 4px 16px rgba(99,102,241,.3)" }}><IPlus />Novo</button>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 10px 4px 8px", borderRadius: 10, background: "#f7f7fb", border: "2px solid #e8e8ee" }}>
               <div style={{ width: 26, height: 26, borderRadius: "50%", background: isAdmin ? "linear-gradient(135deg,#f59e0b,#ef4444)" : "linear-gradient(135deg,#6366f1,#a855f7)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 10, fontWeight: 900 }}>{user.name.split(" ").map(w => w[0]).join("").slice(0, 2)}</div>
               <div style={{ lineHeight: 1.2 }}><span style={{ fontSize: 12, fontWeight: 800, color: "#333", display: "block" }}>{user.name.split(" ")[0]}</span>{isAdmin && <span style={{ fontSize: 9, fontWeight: 900, color: "#f59e0b", display: "flex", alignItems: "center", gap: 2 }}><IShield />ADMIN</span>}</div>
               <button onClick={() => setUser(null)} style={{ background: "none", border: "none", color: "#bbb", cursor: "pointer", display: "flex", padding: 2 }}><IOut /></button>
@@ -191,7 +279,7 @@ export default function Page() {
           </div>
           <button className="mob" onClick={() => setMobileMenu(!mobileMenu)} style={{ background: "none", border: "none", color: "#333", cursor: "pointer", padding: 4, display: "flex" }}><IMenu /></button>
         </div>
-        {mobileMenu && (<div className="mob" style={{ padding: "12px 0", display: "flex", flexDirection: "column", gap: 8, animation: "fUp .2s ease" }}><div style={{ position: "relative" }}><div style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "#bbb" }}><ISearch /></div><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar..." style={{ ...ip, width: "100%", paddingLeft: 34, fontSize: 14, padding: "10px 12px 10px 34px" }} /></div><div style={{ display: "flex", gap: 6 }}><button onClick={openNew} style={{ flex: 1, padding: "10px 0", borderRadius: 10, background: "linear-gradient(135deg,#6366f1,#8b5cf6)", border: "none", color: "#fff", fontSize: 13, fontWeight: 800, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}><IPlus />Novo</button><button onClick={() => { setShowLog(!showLog); setMobileMenu(false); }} style={{ flex: 1, padding: "10px 0", borderRadius: 10, background: "#f7f7fb", border: "2px solid #e8e8ee", color: "#888", fontSize: 13, fontWeight: 800, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}><ILog />Log</button><button onClick={exportCSV} style={{ flex: 1, padding: "10px 0", borderRadius: 10, background: "#f7f7fb", border: "2px solid #e8e8ee", color: "#888", fontSize: 13, fontWeight: 800, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}><IDown />CSV</button></div><div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 10px", borderRadius: 10, background: "#f7f7fb" }}><span style={{ fontSize: 13, fontWeight: 800, color: "#333" }}>{user.name}</span><button onClick={() => setUser(null)} style={{ background: "none", border: "none", color: "#999", cursor: "pointer", fontSize: 12 }}><IOut /></button></div></div>)}
+        {mobileMenu && (<div className="mob" style={{ padding: "12px 0", display: "flex", flexDirection: "column", gap: 8, animation: "fUp .2s ease" }}><div style={{ position: "relative" }}><div style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "#bbb" }}><ISearch /></div><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar..." style={{ ...ip, width: "100%", paddingLeft: 34, fontSize: 14, padding: "10px 12px 10px 34px" }} /></div><div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}><button onClick={openNew} style={{ flex: 1, padding: "10px 0", borderRadius: 10, background: "linear-gradient(135deg,#6366f1,#8b5cf6)", border: "none", color: "#fff", fontSize: 12, fontWeight: 800, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 3 }}><IPlus />Novo</button><button onClick={refresh} style={{ padding: "10px 14px", borderRadius: 10, background: "#fff", border: "2px solid #e8e8ee", color: "#888", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}><IRefresh /></button><button onClick={() => { setShowLog(!showLog); setMobileMenu(false); }} style={{ flex: 1, padding: "10px 0", borderRadius: 10, background: "#f7f7fb", border: "2px solid #e8e8ee", color: "#888", fontSize: 12, fontWeight: 800, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 3 }}><ILog />Log</button><button onClick={exportCSV} style={{ flex: 1, padding: "10px 0", borderRadius: 10, background: "#f7f7fb", border: "2px solid #e8e8ee", color: "#888", fontSize: 12, fontWeight: 800, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 3 }}><IDown />CSV</button></div>{isAdmin && <button onClick={() => { setShowAdmin(true); setMobileMenu(false); }} style={{ padding: "10px 0", borderRadius: 10, background: "#fffbeb", border: "2px solid #fde68a", color: "#d97706", fontSize: 12, fontWeight: 800, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}><IUsers />Gerenciar Usuários</button>}<div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 10px", borderRadius: 10, background: "#f7f7fb" }}><span style={{ fontSize: 13, fontWeight: 800, color: "#333" }}>{user.name}</span><button onClick={() => setUser(null)} style={{ background: "none", border: "none", color: "#999", cursor: "pointer", fontSize: 12 }}><IOut /></button></div></div>)}
       </header>
 
       <div style={{ padding: "12px 20px 0" }}>
@@ -200,16 +288,18 @@ export default function Page() {
           {STAGES.map(s => { const n = cards.filter(c => c.stage === s.key).length; return <button key={s.key} onClick={() => setFilterStage(s.key)} style={{ padding: "6px 14px", borderRadius: 9, fontSize: 12, fontWeight: 800, border: filterStage === s.key ? `2px solid ${s.color}` : "2px solid #e4e4ec", background: filterStage === s.key ? s.bg : "#fff", color: filterStage === s.key ? s.color : "#bbb", cursor: "pointer", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>{s.icon} {s.label} ({n})</button>; })}
         </div>
         <div style={{ display: "flex", gap: 5, overflowX: "auto", paddingBottom: 4 }}>
-          {[{ key: "todos", label: "Todas as datas", color: "#888", bg: "#fff" },{ key: "urgente", label: `⚠️ Urgentes (${urgentCount})`, color: "#dc2626", bg: "#fef2f2" },{ key: "hoje", label: `🔥 Hoje (${todayCount})`, color: "#ef4444", bg: "#fef2f2" },{ key: "amanha", label: `⏰ Amanhã (${cards.filter(c => isTomorrow(c.data_retirada)).length})`, color: "#ea580c", bg: "#fff7ed" },{ key: "atrasado", label: `🚨 Atrasados (${cards.filter(c => isPast(c.data_retirada)).length})`, color: "#dc2626", bg: "#fef2f2" }].map(f => (<button key={f.key} onClick={() => setFilterDate(f.key)} style={{ padding: "5px 12px", borderRadius: 8, fontSize: 11, fontWeight: 800, border: filterDate === f.key ? `2px solid ${f.color}` : "2px solid #e4e4ec", background: filterDate === f.key ? f.bg : "#fff", color: filterDate === f.key ? f.color : "#bbb", cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0 }}>{f.label}</button>))}
+          {[{ key: "todos", label: "Todas as datas", color: "#888" },{ key: "urgente", label: `⚠️ Urgentes (${urgentCount})`, color: "#dc2626" },{ key: "hoje", label: `🔥 Hoje (${todayCount})`, color: "#ef4444" },{ key: "amanha", label: `⏰ Amanhã (${cards.filter(c => isTomorrow(c.data_retirada)).length})`, color: "#ea580c" },{ key: "atrasado", label: `🚨 Atrasados (${cards.filter(c => isPast(c.data_retirada)).length})`, color: "#dc2626" }].map(f => (<button key={f.key} onClick={() => setFilterDate(f.key)} style={{ padding: "5px 12px", borderRadius: 8, fontSize: 11, fontWeight: 800, border: filterDate === f.key ? `2px solid ${f.color}` : "2px solid #e4e4ec", background: filterDate === f.key ? (f.color === "#888" ? "#fff" : "#fef2f2") : "#fff", color: filterDate === f.key ? f.color : "#bbb", cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0 }}>{f.label}</button>))}
         </div>
       </div>
 
-      <div style={{ display: "flex", gap: 0, padding: "12px 20px 32px", minHeight: "calc(100vh - 180px)" }} className="mfull">
+      {cards.some(c => c.stage === "liberado" && c.liberated_at) && <div style={{ margin: "6px 20px 0", padding: "7px 14px", borderRadius: 9, background: "#ecfdf5", border: "1px solid #a7f3d0", fontSize: 12, color: "#065f46", fontWeight: 700, display: "flex", alignItems: "center", gap: 5 }}><ITimer /> Processos liberados são excluídos automaticamente após 2 horas</div>}
+
+      <div style={{ display: "flex", gap: 0, padding: "10px 20px 32px", minHeight: "calc(100vh - 200px)" }} className="mfull">
         <div style={{ flex: 1, minWidth: 0 }}>
-          {filtered.length === 0 ? (<div style={{ textAlign: "center", padding: "60px 20px", color: "#bbb" }}><div style={{ fontSize: 44, marginBottom: 10 }}>📭</div><div style={{ fontSize: 16, fontWeight: 800 }}>Nenhum processo encontrado</div><div style={{ fontSize: 13, marginTop: 6 }}>Clique em &quot;Novo Processo&quot; para criar</div></div>) : filtered.map((card, i) => { const stgData = STAGES.find(s => s.key === card.stage)!; const libAt = card.liberated_at ? new Date(card.liberated_at) : null; const autoMin = libAt ? Math.max(0, Math.ceil((libAt.getTime() + AUTO_DELETE_MS - Date.now()) / 60000)) : null; return <div key={card.id} style={{ animation: `fUp .25s ${i * 0.02}s both` }}><ProcessCard card={card} stgData={stgData} onEdit={openEdit} onDelete={id => setDeleteConfirm(id)} onChangeStage={changeStage} autoMin={autoMin} /></div>; })}
+          {filtered.length === 0 ? (<div style={{ textAlign: "center", padding: "60px 20px", color: "#bbb" }}><div style={{ fontSize: 44, marginBottom: 10 }}>📭</div><div style={{ fontSize: 16, fontWeight: 800 }}>Nenhum processo encontrado</div><div style={{ fontSize: 13, marginTop: 6 }}>Clique em &quot;Novo&quot; para criar</div></div>) : filtered.map((card, i) => { const stgData = STAGES.find(s => s.key === card.stage)!; const libAt = card.liberated_at ? new Date(card.liberated_at) : null; const autoMin = libAt && card.stage === "liberado" ? Math.max(0, Math.ceil((libAt.getTime() + AUTO_DELETE_MS - Date.now()) / 60000)) : null; return <div key={card.id} style={{ animation: `fUp .25s ${i * 0.02}s both` }}><ProcessCard card={card} stgData={stgData} onEdit={openEdit} onDelete={id => setDeleteConfirm(id)} onChangeStage={changeStage} autoMin={autoMin} /></div>; })}
           {filtered.length > 0 && <div style={{ padding: "12px 18px", fontSize: 13, color: "#aaa", fontWeight: 700, display: "flex", justifyContent: "space-between" }}><span>{filtered.length} processo{filtered.length !== 1 ? "s" : ""}</span><span style={{ fontFamily: "var(--fm)" }}>{filtered.reduce((a, c) => a + (c.quantidade || 0), 0)} contêineres</span></div>}
         </div>
-        {showLog && (<div style={{ width: 250, flexShrink: 0, marginLeft: 14, background: "#fff", borderRadius: 16, border: "2px solid #eeeef2", padding: 14, overflow: "auto", maxHeight: "calc(100vh - 180px)", position: "sticky", top: 90, animation: "slideR .25s cubic-bezier(.16,1,.3,1)" }}><h3 style={{ fontSize: 13, fontWeight: 800, color: "#888", marginBottom: 12, display: "flex", alignItems: "center", gap: 5 }}><ILog />Atividade</h3>{activityList.length === 0 ? <p style={{ fontSize: 12, color: "#ccc", textAlign: "center", padding: "14px 0" }}>Nenhuma atividade</p> : activityList.map((a, i) => (<div key={a.id} style={{ padding: "8px 0", borderBottom: i < activityList.length - 1 ? "1px solid #f5f5f8" : "none" }}><div style={{ fontSize: 12, color: "#444", lineHeight: 1.5, fontWeight: 600 }}>{a.text}</div><div style={{ fontSize: 10, color: "#bbb", marginTop: 2, fontFamily: "var(--fm)" }}>{ago(a.created_at)}</div></div>))}</div>)}
+        {showLog && (<div style={{ width: 250, flexShrink: 0, marginLeft: 14, background: "#fff", borderRadius: 16, border: "2px solid #eeeef2", padding: 14, overflow: "auto", maxHeight: "calc(100vh - 200px)", position: "sticky", top: 90, animation: "slideR .25s cubic-bezier(.16,1,.3,1)" }}><h3 style={{ fontSize: 13, fontWeight: 800, color: "#888", marginBottom: 12, display: "flex", alignItems: "center", gap: 5 }}><ILog />Atividade</h3>{activityList.length === 0 ? <p style={{ fontSize: 12, color: "#ccc", textAlign: "center", padding: "14px 0" }}>Nenhuma atividade</p> : activityList.map((a, i) => (<div key={a.id} style={{ padding: "8px 0", borderBottom: i < activityList.length - 1 ? "1px solid #f5f5f8" : "none" }}><div style={{ fontSize: 12, color: "#444", lineHeight: 1.5, fontWeight: 600 }}>{a.text}</div><div style={{ fontSize: 10, color: "#bbb", marginTop: 2, fontFamily: "var(--fm)" }}>{ago(a.created_at)}</div></div>))}</div>)}
       </div>
 
       <Modal open={showForm} onClose={closeForm} title={editId ? "✏️ Editar Processo" : "📋 Novo Processo"}>
@@ -221,23 +311,25 @@ export default function Page() {
           <Fl label="Referência"><input value={form.referencia} onChange={e => updateField("referencia", e.target.value)} placeholder="REF." style={ip} /></Fl>
           <Fl label="Transportadora"><input value={form.transportadora} onChange={e => updateField("transportadora", e.target.value)} placeholder="Nome" style={ip} /></Fl>
           <Fl label="Quantidade"><input type="number" min={1} value={form.quantidade} onChange={e => updateField("quantidade", parseInt(e.target.value) || 1)} style={ip} /></Fl>
-          <Fl label="Tipo de Contêiner"><select value={form.tipo_container} onChange={e => updateField("tipo_container", e.target.value)} style={sl}>{CTYPES.map(t => <option key={t} value={t}>{t}</option>)}</select></Fl>
+          <Fl label="Tipo Contêiner"><select value={form.tipo_container} onChange={e => updateField("tipo_container", e.target.value)} style={sl}>{CTYPES.map(t => <option key={t} value={t}>{t}</option>)}</select></Fl>
           <Fl label="Etapa" span><div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>{STAGES.map(s => <button key={s.key} onClick={() => updateField("stage", s.key)} style={{ padding: "6px 14px", borderRadius: 9, fontSize: 12, fontWeight: 800, border: form.stage === s.key ? `3px solid ${s.color}` : "2px solid #e4e4ec", background: form.stage === s.key ? s.bg : "#fff", color: form.stage === s.key ? s.color : "#bbb", cursor: "pointer", display: "flex", alignItems: "center", gap: 3 }}>{s.icon} {s.label}</button>)}</div></Fl>
           <Fl label="Comentários" span><textarea value={form.comentarios} onChange={e => updateField("comentarios", e.target.value)} placeholder="Observações, notas, instruções..." rows={3} style={{ ...ip, resize: "vertical" }} /></Fl>
         </div>
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
           <button onClick={closeForm} style={{ padding: "10px 20px", borderRadius: 10, background: "#fff", border: "2px solid #e4e4ec", color: "#888", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Cancelar</button>
-          <button onClick={saveCard} style={{ padding: "10px 28px", borderRadius: 10, background: "linear-gradient(135deg,#6366f1,#8b5cf6)", border: "none", color: "#fff", fontSize: 13, fontWeight: 800, cursor: "pointer", opacity: (!form.exportador || !form.reserva) ? 0.4 : 1, boxShadow: "0 4px 16px rgba(99,102,241,.25)" }}>{editId ? "Salvar Alterações" : "Criar Processo"}</button>
+          <button onClick={saveCard} style={{ padding: "10px 28px", borderRadius: 10, background: "linear-gradient(135deg,#6366f1,#8b5cf6)", border: "none", color: "#fff", fontSize: 13, fontWeight: 800, cursor: "pointer", opacity: (!form.exportador || !form.reserva) ? 0.4 : 1, boxShadow: "0 4px 16px rgba(99,102,241,.25)" }}>{editId ? "Salvar" : "Criar Processo"}</button>
         </div>
       </Modal>
 
       <Modal open={!!deleteConfirm} onClose={() => setDeleteConfirm(null)} title="⚠️ Excluir Processo" w={400}>
-        <p style={{ color: "#555", fontSize: 14, fontWeight: 600, marginBottom: 16 }}>Tem certeza que deseja excluir? Ação irreversível.</p>
+        <p style={{ color: "#555", fontSize: 14, fontWeight: 600, marginBottom: 16 }}>Tem certeza? Ação irreversível.</p>
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
           <button onClick={() => setDeleteConfirm(null)} style={{ padding: "10px 20px", borderRadius: 10, background: "#fff", border: "2px solid #e4e4ec", color: "#888", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Cancelar</button>
           <button onClick={() => deleteConfirm && handleDelete(deleteConfirm)} style={{ padding: "10px 24px", borderRadius: 10, background: "#ef4444", border: "none", color: "#fff", fontSize: 13, fontWeight: 800, cursor: "pointer" }}>Excluir</button>
         </div>
       </Modal>
+
+      <AdminPanel open={showAdmin} onClose={() => setShowAdmin(false)} />
     </div>
   );
 }
