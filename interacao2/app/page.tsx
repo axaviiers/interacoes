@@ -1,3 +1,5 @@
+"use client";
+
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { loadState, saveState, subscribeToChanges, supabase } from "./lib/db.js";
 
