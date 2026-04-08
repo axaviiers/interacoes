@@ -11,6 +11,7 @@ export type Stage =
   | "sem_container"
   | "contato_terminal"
   | "aguardando"
+  | "aguardando_data_liberacao"
   | "liberado"
   | "concluido";
 
@@ -39,6 +40,21 @@ export interface ActivityLog {
   text: string;
   user_name: string;
   created_at: string;
+}
+
+export interface ClientNote {
+  id: string;
+  text: string;
+  created_at: string;
+  created_by?: string | null;
+}
+
+export interface ClientSpecific {
+  id: string;
+  client_name: string;
+  notes: ClientNote[];
+  created_at: string;
+  updated_at: string;
 }
 
 // ═══ PROCESSES ═══
@@ -108,6 +124,77 @@ export async function addActivity(
   if (error) console.error("Activity log error:", error);
 }
 
+// ═══ CLIENT SPECIFICS (Particularidades dos Clientes) ═══
+
+export async function getClientSpecifics(): Promise<ClientSpecific[]> {
+  const { data, error } = await supabase
+    .from("client_specifics")
+    .select("*")
+    .order("client_name", { ascending: true });
+  if (error) throw error;
+  return (data || []).map((r: any) => ({
+    ...r,
+    notes: Array.isArray(r.notes) ? r.notes : [],
+  })) as ClientSpecific[];
+}
+
+export async function createClientSpecific(
+  clientName: string
+): Promise<ClientSpecific> {
+  const { data, error } = await supabase
+    .from("client_specifics")
+    .insert({ client_name: clientName.trim(), notes: [] })
+    .select()
+    .single();
+  if (error) throw error;
+  return { ...(data as any), notes: [] } as ClientSpecific;
+}
+
+export async function updateClientSpecific(
+  id: string,
+  updates: { client_name?: string; notes?: ClientNote[] }
+): Promise<ClientSpecific> {
+  const { data, error } = await supabase
+    .from("client_specifics")
+    .update({ ...updates, updated_at: new Date().toISOString() })
+    .eq("id", id)
+    .select()
+    .single();
+  if (error) throw error;
+  return data as ClientSpecific;
+}
+
+export async function deleteClientSpecific(id: string): Promise<void> {
+  const { error } = await supabase
+    .from("client_specifics")
+    .delete()
+    .eq("id", id);
+  if (error) throw error;
+}
+
+/**
+ * Busca cliente por nome (case-insensitive, trimmed).
+ * Retorna null se não encontrar.
+ */
+export async function findClientByName(
+  name: string
+): Promise<ClientSpecific | null> {
+  const clean = (name || "").trim();
+  if (!clean) return null;
+  const { data, error } = await supabase
+    .from("client_specifics")
+    .select("*")
+    .ilike("client_name", clean)
+    .limit(1);
+  if (error) {
+    console.error("findClientByName error:", error);
+    return null;
+  }
+  if (!data || data.length === 0) return null;
+  const row: any = data[0];
+  return { ...row, notes: Array.isArray(row.notes) ? row.notes : [] } as ClientSpecific;
+}
+
 // ═══ REALTIME ═══
 
 export function subscribeToProcesses(callback: (payload: any) => void) {
@@ -127,6 +214,17 @@ export function subscribeToActivity(callback: (payload: any) => void) {
     .on(
       "postgres_changes",
       { event: "INSERT", schema: "public", table: "activity_log" },
+      callback
+    )
+    .subscribe();
+}
+
+export function subscribeToClientSpecifics(callback: (payload: any) => void) {
+  return supabase
+    .channel("client_specifics_changes")
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "client_specifics" },
       callback
     )
     .subscribe();
