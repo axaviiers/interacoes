@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import {
   supabase,
   getProcesses,
@@ -12,8 +12,13 @@ import {
   autoDeleteLiberated,
   subscribeToProcesses,
   subscribeToActivity,
+  getClientSpecifics,
+  createClientSpecific,
+  updateClientSpecific,
+  deleteClientSpecific,
+  subscribeToClientSpecifics,
 } from "@/lib/supabase";
-import type { ContainerProcess, ActivityLog, Stage } from "@/lib/supabase";
+import type { ContainerProcess, ActivityLog, Stage, ClientSpecific, ClientNote } from "@/lib/supabase";
 
 const AUTO_DELETE_MS = 2 * 60 * 60 * 1000;
 const today = () => new Date().toISOString().slice(0, 10);
@@ -26,6 +31,7 @@ const STAGES: { key: Stage; label: string; icon: string; color: string; bg: stri
   { key: "sem_container", label: "Sem Container", icon: "📭", color: "#dc2626", bg: "#fef2f2" },
   { key: "contato_terminal", label: "Contato Terminal", icon: "📞", color: "#7c3aed", bg: "#f5f3ff" },
   { key: "aguardando", label: "Aguard. Estratégia", icon: "⏳", color: "#db2777", bg: "#fdf2f8" },
+  { key: "aguardando_data_liberacao", label: "Aguard. Data Liberação", icon: "📅", color: "#0891b2", bg: "#ecfeff" },
   { key: "liberado", label: "Liberado", icon: "✅", color: "#059669", bg: "#ecfdf5" },
   { key: "concluido", label: "Concluído", icon: "📦", color: "#0284c7", bg: "#f0f9ff" },
 ];
@@ -36,6 +42,7 @@ const ff = (d: string | null) => { if (!d) return "—"; return new Date(d + "T1
 const ago = (iso: string) => { const m = Math.floor((Date.now() - new Date(iso).getTime()) / 60000); if (m < 1) return "agora"; if (m < 60) return m+"min"; const h = Math.floor(m / 60); if (h < 24) return h+"h"; return Math.floor(h / 24)+"d"; };
 const dateColor = (d: string | null) => { if (!d) return "#b0b0b0"; if (isPast(d)) return "#dc2626"; if (isToday(d)) return "#dc2626"; if (isTomorrow(d)) return "#ea580c"; return "#1a1a2e"; };
 const dateLabel = (d: string | null) => { if (!d) return ""; if (isPast(d)) return "ATRASADO"; if (isToday(d)) return "HOJE"; if (isTomorrow(d)) return "AMANHÃ"; return ""; };
+const normName = (s: string) => (s || "").trim().toLowerCase();
 
 const IX = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>;
 const IPlus = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>;
@@ -50,6 +57,8 @@ const IChev = ({ d = "down" }: { d?: string }) => <svg width="14" height="14" vi
 const IMenu = () => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>;
 const IShield = () => <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>;
 const ITimer = () => <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2"/><path d="M5 3L2 6"/><path d="M22 6l-3-3"/><line x1="12" y1="1" x2="12" y2="3"/></svg>;
+const IStar = () => <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>;
+const IUsers = () => <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>;
 
 const ip: React.CSSProperties = { width: "100%", padding: "10px 14px", fontSize: 14, border: "2px solid #e2e2ea", borderRadius: 10, background: "#fff", color: "#1a1a2e", outline: "none", fontFamily: "'Nunito',sans-serif", boxSizing: "border-box", fontWeight: 600 };
 const sl: React.CSSProperties = { ...ip, cursor: "pointer" };
@@ -94,7 +103,7 @@ function ProcessCard({ card, stgData, onEdit, onDelete, onChangeStage, autoMin }
     </div>
     {!open && card.comentarios && <div style={{ padding: "0 18px 10px", marginTop: -4 }}><span style={{ fontSize: 12, color: "#888", fontWeight: 600, fontStyle: "italic" }}>💬 {card.comentarios.length > 80 ? card.comentarios.slice(0, 80) + "…" : card.comentarios}</span></div>}
     {open && (<div style={{ padding: "0 18px 18px", borderTop: "2px solid #f0f0f5", animation: "fUp .18s ease" }}>
-      {card.comentarios && <div style={{ margin: "14px 0", padding: "10px 14px", borderRadius: 10, background: "#f8f8fc", fontSize: 14, color: "#444", lineHeight: 1.6, borderLeft: "4px solid #6366f1", fontWeight: 600 }}>💬 {card.comentarios}</div>}
+      {card.comentarios && <div style={{ margin: "14px 0", padding: "10px 14px", borderRadius: 10, background: "#f8f8fc", fontSize: 14, color: "#444", lineHeight: 1.6, borderLeft: "4px solid #6366f1", fontWeight: 600, whiteSpace: "pre-wrap" }}>💬 {card.comentarios}</div>}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: "10px 18px", padding: "12px 0 16px" }}>
         <div><div style={{ fontSize: 10, color: "#999", fontWeight: 800, textTransform: "uppercase", marginBottom: 3 }}>Transportadora</div><div style={{ fontSize: 15, color: "#1a1a2e", fontWeight: 700 }}>{card.transportadora || "—"}</div></div>
         <div><div style={{ fontSize: 10, color: "#999", fontWeight: 800, textTransform: "uppercase", marginBottom: 3 }}>Data Retirada</div><div style={{ fontSize: 15, color: dColor, fontWeight: 900 }}>{ff(card.data_retirada)} {dLabel && <span style={{ fontSize: 10, background: dColor, color: "#fff", padding: "1px 6px", borderRadius: 4, marginLeft: 4 }}>{dLabel}</span>}</div></div>
@@ -108,12 +117,133 @@ function ProcessCard({ card, stgData, onEdit, onDelete, onChangeStage, autoMin }
   </div>);
 }
 
+// ══════════ CLIENTS MODAL ══════════
+function ClientsModal({ open, onClose, clients, userName, onChanged }: { open: boolean; onClose: () => void; clients: ClientSpecific[]; userName: string; onChanged: () => void; }) {
+  const [newClientName, setNewClientName] = useState("");
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [newNoteText, setNewNoteText] = useState<Record<string, string>>({});
+  const [editNameId, setEditNameId] = useState<string | null>(null);
+  const [editNameValue, setEditNameValue] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const addClient = async () => {
+    const n = newClientName.trim();
+    if (!n || busy) return;
+    if (clients.some(c => normName(c.client_name) === normName(n))) { alert("Cliente já cadastrado."); return; }
+    setBusy(true);
+    try { const c = await createClientSpecific(n); setNewClientName(""); setExpandedId(c.id); onChanged(); }
+    catch (e: any) { console.error(e); alert("Erro ao criar cliente: " + (e?.message || "")); }
+    setBusy(false);
+  };
+
+  const addNote = async (client: ClientSpecific) => {
+    const text = (newNoteText[client.id] || "").trim();
+    if (!text || busy) return;
+    setBusy(true);
+    try {
+      const note: ClientNote = { id: crypto.randomUUID(), text, created_at: new Date().toISOString(), created_by: userName };
+      await updateClientSpecific(client.id, { notes: [...client.notes, note] });
+      setNewNoteText(s => ({ ...s, [client.id]: "" }));
+      onChanged();
+    } catch (e) { console.error(e); }
+    setBusy(false);
+  };
+
+  const removeNote = async (client: ClientSpecific, noteId: string) => {
+    if (busy) return;
+    setBusy(true);
+    try { await updateClientSpecific(client.id, { notes: client.notes.filter(n => n.id !== noteId) }); onChanged(); }
+    catch (e) { console.error(e); }
+    setBusy(false);
+  };
+
+  const saveClientName = async (client: ClientSpecific) => {
+    const n = editNameValue.trim();
+    if (!n || busy) { setEditNameId(null); return; }
+    if (n.toLowerCase() === client.client_name.toLowerCase()) { setEditNameId(null); return; }
+    if (clients.some(c => c.id !== client.id && normName(c.client_name) === normName(n))) { alert("Já existe cliente com esse nome."); return; }
+    setBusy(true);
+    try { await updateClientSpecific(client.id, { client_name: n }); setEditNameId(null); onChanged(); }
+    catch (e: any) { console.error(e); alert("Erro: " + (e?.message || "")); }
+    setBusy(false);
+  };
+
+  const removeClient = async (client: ClientSpecific) => {
+    if (!confirm(`Excluir cliente "${client.client_name}" e todas as suas notas?`)) return;
+    setBusy(true);
+    try { await deleteClientSpecific(client.id); onChanged(); }
+    catch (e) { console.error(e); }
+    setBusy(false);
+  };
+
+  return (
+    <Modal open={open} onClose={onClose} title="⭐ Particularidades dos Clientes" w={680}>
+      <p style={{ fontSize: 13, color: "#666", marginBottom: 14, lineHeight: 1.5 }}>Cadastre clientes e suas instruções. Sempre que um novo processo for criado com o nome do cliente no campo <b>Exportador</b>, as notas serão adicionadas automaticamente aos comentários.</p>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 18, padding: 12, background: "#faf9ff", borderRadius: 12, border: "2px solid #eeebff" }}>
+        <input value={newClientName} onChange={e => setNewClientName(e.target.value)} onKeyDown={e => e.key === "Enter" && addClient()} placeholder="Nome do cliente (ex: ACME Trading)" style={{ ...ip, flex: 1 }} />
+        <button onClick={addClient} disabled={!newClientName.trim() || busy} style={{ padding: "10px 18px", borderRadius: 10, background: "linear-gradient(135deg,#6366f1,#8b5cf6)", border: "none", color: "#fff", fontSize: 13, fontWeight: 800, cursor: "pointer", opacity: !newClientName.trim() || busy ? 0.4 : 1, display: "flex", alignItems: "center", gap: 4, whiteSpace: "nowrap" }}><IPlus />Adicionar</button>
+      </div>
+
+      {clients.length === 0 ? (
+        <div style={{ textAlign: "center", padding: "36px 20px", color: "#bbb" }}>
+          <div style={{ fontSize: 38, marginBottom: 8 }}>⭐</div>
+          <div style={{ fontSize: 14, fontWeight: 700 }}>Nenhum cliente cadastrado ainda</div>
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {clients.map(c => {
+            const isOpen = expandedId === c.id;
+            const isEditing = editNameId === c.id;
+            return (
+              <div key={c.id} style={{ border: "2px solid #eeeef2", borderRadius: 12, overflow: "hidden", background: "#fff" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", cursor: "pointer", background: isOpen ? "#faf9ff" : "#fff" }} onClick={() => !isEditing && setExpandedId(isOpen ? null : c.id)}>
+                  <div style={{ color: "#f59e0b", display: "flex" }}><IStar /></div>
+                  {isEditing ? (
+                    <input autoFocus value={editNameValue} onChange={e => setEditNameValue(e.target.value)} onClick={e => e.stopPropagation()} onKeyDown={e => { if (e.key === "Enter") saveClientName(c); if (e.key === "Escape") setEditNameId(null); }} onBlur={() => saveClientName(c)} style={{ ...ip, flex: 1, padding: "6px 10px", fontSize: 15 }} />
+                  ) : (
+                    <span style={{ fontSize: 15, fontWeight: 800, color: "#1a1a2e", flex: 1 }}>{c.client_name}</span>
+                  )}
+                  <span style={{ fontSize: 11, fontWeight: 800, color: "#888", background: "#f0f0f5", padding: "3px 10px", borderRadius: 6 }}>{c.notes.length} nota{c.notes.length !== 1 ? "s" : ""}</span>
+                  <button onClick={e => { e.stopPropagation(); setEditNameId(c.id); setEditNameValue(c.client_name); }} style={{ background: "#f0eeff", border: "1px solid #ddd8ff", color: "#6366f1", cursor: "pointer", padding: "5px 7px", borderRadius: 7, display: "flex" }} title="Renomear"><IEdit /></button>
+                  <button onClick={e => { e.stopPropagation(); removeClient(c); }} style={{ background: "#fef2f2", border: "1px solid #fecaca", color: "#ef4444", cursor: "pointer", padding: "5px 7px", borderRadius: 7, display: "flex" }} title="Excluir"><ITrash /></button>
+                  <IChev d={isOpen ? "up" : "down"} />
+                </div>
+                {isOpen && (
+                  <div style={{ padding: "4px 14px 14px", borderTop: "1px solid #f0f0f5", animation: "fUp .18s ease" }}>
+                    {c.notes.length > 0 && (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 10 }}>
+                        {c.notes.map(n => (
+                          <div key={n.id} style={{ display: "flex", gap: 8, padding: "10px 12px", background: "#fffef5", border: "1px solid #fef3c7", borderLeft: "4px solid #f59e0b", borderRadius: 8 }}>
+                            <div style={{ flex: 1, fontSize: 13, color: "#444", lineHeight: 1.5, fontWeight: 600, whiteSpace: "pre-wrap" }}>{n.text}</div>
+                            <button onClick={() => removeNote(c, n.id)} style={{ background: "none", border: "none", color: "#ef4444", cursor: "pointer", padding: 4, display: "flex", alignSelf: "flex-start" }} title="Remover nota"><ITrash /></button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
+                      <textarea value={newNoteText[c.id] || ""} onChange={e => setNewNoteText(s => ({ ...s, [c.id]: e.target.value }))} placeholder="Nova instrução/observação do cliente..." rows={2} style={{ ...ip, flex: 1, resize: "vertical", fontSize: 13 }} />
+                      <button onClick={() => addNote(c)} disabled={!(newNoteText[c.id] || "").trim() || busy} style={{ padding: "0 14px", borderRadius: 10, background: "#6366f1", border: "none", color: "#fff", fontSize: 12, fontWeight: 800, cursor: "pointer", opacity: !(newNoteText[c.id] || "").trim() || busy ? 0.4 : 1, display: "flex", alignItems: "center", gap: 4, whiteSpace: "nowrap" }}><IPlus />Nota</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </Modal>
+  );
+}
+
 export default function Page() {
   const [user, setUser] = useState<AppUser | null>(null);
   const [cards, setCards] = useState<ContainerProcess[]>([]);
   const [activityList, setActivityList] = useState<ActivityLog[]>([]);
+  const [clientSpecs, setClientSpecs] = useState<ClientSpecific[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
+  const [showClients, setShowClients] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [form, setForm] = useState({ stage: "sem_container" as Stage, exportador: "", reserva: "", data_retirada: "", data_carregamento: "", quantidade: 1, tipo_container: "40' HC", transportadora: "", referencia: "", comentarios: "" });
   const [search, setSearch] = useState("");
@@ -126,26 +256,50 @@ export default function Page() {
 
   useEffect(() => {
     if (!user) return; let m = true;
-    const load = async () => { try { const [p, a] = await Promise.all([getProcesses(), getActivity()]); if (m) { setCards(p); setActivityList(a); } } catch (e) { console.error(e); } if (m) setLoading(false); };
+    const load = async () => { try { const [p, a, cs] = await Promise.all([getProcesses(), getActivity(), getClientSpecifics()]); if (m) { setCards(p); setActivityList(a); setClientSpecs(cs); } } catch (e) { console.error(e); } if (m) setLoading(false); };
     load();
     const s1 = subscribeToProcesses(() => { getProcesses().then(d => m && setCards(d)).catch(console.error); });
     const s2 = subscribeToActivity(() => { getActivity().then(d => m && setActivityList(d)).catch(console.error); });
+    const s3 = subscribeToClientSpecifics(() => { getClientSpecifics().then(d => m && setClientSpecs(d)).catch(console.error); });
     const iv = setInterval(() => { setTick(t => t + 1); autoDeleteLiberated().catch(console.error); }, 30000);
-    return () => { m = false; s1.unsubscribe(); s2.unsubscribe(); clearInterval(iv); };
+    return () => { m = false; s1.unsubscribe(); s2.unsubscribe(); s3.unsubscribe(); clearInterval(iv); };
   }, [user]);
+
+  const reloadClients = () => { getClientSpecifics().then(setClientSpecs).catch(console.error); };
+
+  // Cliente que bate com o exportador digitado no form (lookup local)
+  const matchedClient = useMemo(() => {
+    const n = normName(form.exportador);
+    if (!n) return null;
+    return clientSpecs.find(c => normName(c.client_name) === n) || null;
+  }, [form.exportador, clientSpecs]);
 
   const openNew = () => { setForm({ stage: "sem_container", exportador: "", reserva: "", data_retirada: "", data_carregamento: "", quantidade: 1, tipo_container: "40' HC", transportadora: "", referencia: "", comentarios: "" }); setEditId(null); setShowForm(true); setMobileMenu(false); };
   const openEdit = (c: ContainerProcess) => { setForm({ stage: c.stage, exportador: c.exportador, reserva: c.reserva, data_retirada: c.data_retirada || "", data_carregamento: c.data_carregamento || "", quantidade: c.quantidade, tipo_container: c.tipo_container, transportadora: c.transportadora || "", referencia: c.referencia || "", comentarios: c.comentarios || "" }); setEditId(c.id); setShowForm(true); };
   const closeForm = () => { setShowForm(false); setEditId(null); };
+
   const saveCard = async () => {
     if (!form.exportador || !form.reserva || !user) return;
     try {
-      if (editId) { const old = cards.find(c => c.id === editId); await updateProcess(editId, { stage: form.stage, exportador: form.exportador, reserva: form.reserva, data_retirada: form.data_retirada || null, data_carregamento: form.data_carregamento || null, quantidade: form.quantidade, tipo_container: form.tipo_container, transportadora: form.transportadora || null, referencia: form.referencia || null, comentarios: form.comentarios || null, liberated_at: form.stage === "liberado" && old?.stage !== "liberado" ? new Date().toISOString() : old?.liberated_at || null }); await addActivity(`✏️ Editou ${form.exportador} — ${form.reserva}`, user.name); }
-      else { await createProcess({ stage: form.stage, exportador: form.exportador, reserva: form.reserva, data_retirada: form.data_retirada || null, data_carregamento: form.data_carregamento || null, quantidade: form.quantidade, tipo_container: form.tipo_container, transportadora: form.transportadora || null, referencia: form.referencia || null, comentarios: form.comentarios || null, created_by: user.name, liberated_at: form.stage === "liberado" ? new Date().toISOString() : null }); await addActivity(`📋 Criou ${form.exportador} — ${form.reserva}`, user.name); }
+      if (editId) {
+        const old = cards.find(c => c.id === editId);
+        await updateProcess(editId, { stage: form.stage, exportador: form.exportador, reserva: form.reserva, data_retirada: form.data_retirada || null, data_carregamento: form.data_carregamento || null, quantidade: form.quantidade, tipo_container: form.tipo_container, transportadora: form.transportadora || null, referencia: form.referencia || null, comentarios: form.comentarios || null, liberated_at: form.stage === "liberado" && old?.stage !== "liberado" ? new Date().toISOString() : old?.liberated_at || null });
+        await addActivity(`✏️ Editou ${form.exportador} — ${form.reserva}`, user.name);
+      } else {
+        // Auto-append de notas do cliente cadastrado
+        let finalComentarios = form.comentarios || "";
+        if (matchedClient && matchedClient.notes.length > 0) {
+          const block = matchedClient.notes.map(n => `⭐ ${n.text}`).join("\n");
+          finalComentarios = finalComentarios ? `${block}\n\n${finalComentarios}` : block;
+        }
+        await createProcess({ stage: form.stage, exportador: form.exportador, reserva: form.reserva, data_retirada: form.data_retirada || null, data_carregamento: form.data_carregamento || null, quantidade: form.quantidade, tipo_container: form.tipo_container, transportadora: form.transportadora || null, referencia: form.referencia || null, comentarios: finalComentarios || null, created_by: user.name, liberated_at: form.stage === "liberado" ? new Date().toISOString() : null });
+        await addActivity(`📋 Criou ${form.exportador} — ${form.reserva}${matchedClient && matchedClient.notes.length > 0 ? ` (⭐ ${matchedClient.notes.length} nota(s) do cliente aplicadas)` : ""}`, user.name);
+      }
       setCards(await getProcesses());
     } catch (e) { console.error(e); }
     closeForm();
   };
+
   const changeStage = async (id: string, ns: Stage) => { if (!user) return; const c = cards.find(x => x.id === id); if (!c || c.stage === ns) return; try { await updateProcess(id, { stage: ns, liberated_at: ns === "liberado" ? new Date().toISOString() : c.liberated_at }); await addActivity(`➡️ ${c.exportador}: ${STAGES.find(s => s.key === c.stage)?.label} → ${STAGES.find(s => s.key === ns)?.label}`, user.name); setCards(await getProcesses()); } catch (e) { console.error(e); } };
   const handleDelete = async (id: string) => { if (!user) return; const c = cards.find(x => x.id === id); try { await deleteProcess(id); if (c) await addActivity(`🗑️ Excluiu ${c.exportador} — ${c.reserva}`, user.name); setCards(await getProcesses()); } catch (e) { console.error(e); } setDeleteConfirm(null); };
   const updateField = (k: string, v: any) => setForm(f => ({ ...f, [k]: v }));
@@ -180,6 +334,7 @@ export default function Page() {
           </div>
           <div className="desk" style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <div style={{ position: "relative" }}><div style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "#bbb" }}><ISearch /></div><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar exportador, reserva..." style={{ ...ip, width: 280, paddingLeft: 34, fontSize: 13, padding: "8px 12px 8px 34px", borderRadius: 10, background: "#f7f7fb", border: "2px solid #e8e8ee" }} /></div>
+            <button onClick={() => setShowClients(true)} style={{ display: "flex", alignItems: "center", gap: 4, padding: "8px 14px", borderRadius: 10, background: "#fffbeb", border: "2px solid #fde68a", color: "#d97706", fontSize: 12, fontWeight: 800, cursor: "pointer" }} title="Particularidades dos Clientes"><IStar />Clientes</button>
             <button onClick={() => setShowLog(!showLog)} style={{ display: "flex", alignItems: "center", gap: 4, padding: "8px 14px", borderRadius: 10, background: showLog ? "#f0eeff" : "#fff", border: "2px solid #e8e8ee", color: showLog ? "#6366f1" : "#888", fontSize: 12, fontWeight: 800, cursor: "pointer" }}><ILog />Log</button>
             <button onClick={exportCSV} style={{ display: "flex", alignItems: "center", gap: 4, padding: "8px 14px", borderRadius: 10, background: "#fff", border: "2px solid #e8e8ee", color: "#888", fontSize: 12, fontWeight: 800, cursor: "pointer" }}><IDown />CSV</button>
             <button onClick={openNew} style={{ display: "flex", alignItems: "center", gap: 4, padding: "8px 18px", borderRadius: 10, background: "linear-gradient(135deg,#6366f1,#8b5cf6)", border: "none", color: "#fff", fontSize: 13, fontWeight: 800, cursor: "pointer", boxShadow: "0 4px 16px rgba(99,102,241,.3)" }}><IPlus />Novo Processo</button>
@@ -191,7 +346,7 @@ export default function Page() {
           </div>
           <button className="mob" onClick={() => setMobileMenu(!mobileMenu)} style={{ background: "none", border: "none", color: "#333", cursor: "pointer", padding: 4, display: "flex" }}><IMenu /></button>
         </div>
-        {mobileMenu && (<div className="mob" style={{ padding: "12px 0", display: "flex", flexDirection: "column", gap: 8, animation: "fUp .2s ease" }}><div style={{ position: "relative" }}><div style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "#bbb" }}><ISearch /></div><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar..." style={{ ...ip, width: "100%", paddingLeft: 34, fontSize: 14, padding: "10px 12px 10px 34px" }} /></div><div style={{ display: "flex", gap: 6 }}><button onClick={openNew} style={{ flex: 1, padding: "10px 0", borderRadius: 10, background: "linear-gradient(135deg,#6366f1,#8b5cf6)", border: "none", color: "#fff", fontSize: 13, fontWeight: 800, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}><IPlus />Novo</button><button onClick={() => { setShowLog(!showLog); setMobileMenu(false); }} style={{ flex: 1, padding: "10px 0", borderRadius: 10, background: "#f7f7fb", border: "2px solid #e8e8ee", color: "#888", fontSize: 13, fontWeight: 800, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}><ILog />Log</button><button onClick={exportCSV} style={{ flex: 1, padding: "10px 0", borderRadius: 10, background: "#f7f7fb", border: "2px solid #e8e8ee", color: "#888", fontSize: 13, fontWeight: 800, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}><IDown />CSV</button></div><div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 10px", borderRadius: 10, background: "#f7f7fb" }}><span style={{ fontSize: 13, fontWeight: 800, color: "#333" }}>{user.name}</span><button onClick={() => setUser(null)} style={{ background: "none", border: "none", color: "#999", cursor: "pointer", fontSize: 12 }}><IOut /></button></div></div>)}
+        {mobileMenu && (<div className="mob" style={{ padding: "12px 0", display: "flex", flexDirection: "column", gap: 8, animation: "fUp .2s ease" }}><div style={{ position: "relative" }}><div style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "#bbb" }}><ISearch /></div><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar..." style={{ ...ip, width: "100%", paddingLeft: 34, fontSize: 14, padding: "10px 12px 10px 34px" }} /></div><div style={{ display: "flex", gap: 6 }}><button onClick={openNew} style={{ flex: 1, padding: "10px 0", borderRadius: 10, background: "linear-gradient(135deg,#6366f1,#8b5cf6)", border: "none", color: "#fff", fontSize: 13, fontWeight: 800, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}><IPlus />Novo</button><button onClick={() => { setShowClients(true); setMobileMenu(false); }} style={{ flex: 1, padding: "10px 0", borderRadius: 10, background: "#fffbeb", border: "2px solid #fde68a", color: "#d97706", fontSize: 13, fontWeight: 800, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}><IStar />Clientes</button></div><div style={{ display: "flex", gap: 6 }}><button onClick={() => { setShowLog(!showLog); setMobileMenu(false); }} style={{ flex: 1, padding: "10px 0", borderRadius: 10, background: "#f7f7fb", border: "2px solid #e8e8ee", color: "#888", fontSize: 13, fontWeight: 800, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}><ILog />Log</button><button onClick={exportCSV} style={{ flex: 1, padding: "10px 0", borderRadius: 10, background: "#f7f7fb", border: "2px solid #e8e8ee", color: "#888", fontSize: 13, fontWeight: 800, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}><IDown />CSV</button></div><div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 10px", borderRadius: 10, background: "#f7f7fb" }}><span style={{ fontSize: 13, fontWeight: 800, color: "#333" }}>{user.name}</span><button onClick={() => setUser(null)} style={{ background: "none", border: "none", color: "#999", cursor: "pointer", fontSize: 12 }}><IOut /></button></div></div>)}
       </header>
 
       <div style={{ padding: "12px 20px 0" }}>
@@ -216,6 +371,12 @@ export default function Page() {
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px 16px" }}>
           <Fl label="Exportador *"><input value={form.exportador} onChange={e => updateField("exportador", e.target.value)} placeholder="Nome do exportador" style={ip} /></Fl>
           <Fl label="Reserva (Booking) *"><input value={form.reserva} onChange={e => updateField("reserva", e.target.value)} placeholder="Nº da reserva" style={ip} /></Fl>
+          {!editId && matchedClient && matchedClient.notes.length > 0 && (
+            <div style={{ gridColumn: "1/-1", padding: "10px 14px", borderRadius: 10, background: "#fffbeb", border: "2px solid #fde68a", fontSize: 12, color: "#92400e", fontWeight: 700, display: "flex", alignItems: "center", gap: 8, lineHeight: 1.4 }}>
+              <div style={{ color: "#f59e0b", display: "flex" }}><IStar /></div>
+              <div>Cliente <b>{matchedClient.client_name}</b> está cadastrado — <b>{matchedClient.notes.length} nota{matchedClient.notes.length !== 1 ? "s" : ""}</b> será{matchedClient.notes.length !== 1 ? "ão" : ""} adicionada{matchedClient.notes.length !== 1 ? "s" : ""} automaticamente aos comentários ao criar o processo.</div>
+            </div>
+          )}
           <Fl label="Data de Retirada"><input type="date" value={form.data_retirada} onChange={e => updateField("data_retirada", e.target.value)} style={ip} /></Fl>
           <Fl label="Data de Carregamento"><input type="date" value={form.data_carregamento} onChange={e => updateField("data_carregamento", e.target.value)} style={ip} /></Fl>
           <Fl label="Referência"><input value={form.referencia} onChange={e => updateField("referencia", e.target.value)} placeholder="REF." style={ip} /></Fl>
@@ -238,6 +399,8 @@ export default function Page() {
           <button onClick={() => deleteConfirm && handleDelete(deleteConfirm)} style={{ padding: "10px 24px", borderRadius: 10, background: "#ef4444", border: "none", color: "#fff", fontSize: 13, fontWeight: 800, cursor: "pointer" }}>Excluir</button>
         </div>
       </Modal>
+
+      <ClientsModal open={showClients} onClose={() => setShowClients(false)} clients={clientSpecs} userName={user.name} onChanged={reloadClients} />
     </div>
   );
 }
