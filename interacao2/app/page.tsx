@@ -252,6 +252,7 @@ export default function Page() {
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [showLog, setShowLog] = useState(false);
   const [mobileMenu, setMobileMenu] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [, setTick] = useState(0);
 
   useEffect(() => {
@@ -280,13 +281,15 @@ export default function Page() {
 
   const saveCard = async () => {
     if (!form.exportador || !form.reserva || !user) return;
+    if (saving) return;
+    setSaving(true);
     try {
       if (editId) {
         const old = cards.find(c => c.id === editId);
         await updateProcess(editId, { stage: form.stage, exportador: form.exportador, reserva: form.reserva, data_retirada: form.data_retirada || null, data_carregamento: form.data_carregamento || null, quantidade: form.quantidade, tipo_container: form.tipo_container, transportadora: form.transportadora || null, referencia: form.referencia || null, comentarios: form.comentarios || null, liberated_at: form.stage === "liberado" && old?.stage !== "liberado" ? new Date().toISOString() : old?.liberated_at || null });
         await addActivity(`✏️ Editou ${form.exportador} — ${form.reserva}`, user.name);
       } else {
-        // Auto-append de notas do cliente cadastrado
+        // Auto-append de notas do cliente cadastrado (apenas na criação)
         let finalComentarios = form.comentarios || "";
         if (matchedClient && matchedClient.notes.length > 0) {
           const block = matchedClient.notes.map(n => `⭐ ${n.text}`).join("\n");
@@ -296,8 +299,9 @@ export default function Page() {
         await addActivity(`📋 Criou ${form.exportador} — ${form.reserva}${matchedClient && matchedClient.notes.length > 0 ? ` (⭐ ${matchedClient.notes.length} nota(s) do cliente aplicadas)` : ""}`, user.name);
       }
       setCards(await getProcesses());
-    } catch (e) { console.error(e); }
-    closeForm();
+      closeForm();
+    } catch (e) { console.error(e); alert("Erro ao salvar. Tente novamente."); }
+    setSaving(false);
   };
 
   const changeStage = async (id: string, ns: Stage) => { if (!user) return; const c = cards.find(x => x.id === id); if (!c || c.stage === ns) return; try { await updateProcess(id, { stage: ns, liberated_at: ns === "liberado" ? new Date().toISOString() : c.liberated_at }); await addActivity(`➡️ ${c.exportador}: ${STAGES.find(s => s.key === c.stage)?.label} → ${STAGES.find(s => s.key === ns)?.label}`, user.name); setCards(await getProcesses()); } catch (e) { console.error(e); } };
@@ -371,12 +375,6 @@ export default function Page() {
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px 16px" }}>
           <Fl label="Exportador *"><input value={form.exportador} onChange={e => updateField("exportador", e.target.value)} placeholder="Nome do exportador" style={ip} /></Fl>
           <Fl label="Reserva (Booking) *"><input value={form.reserva} onChange={e => updateField("reserva", e.target.value)} placeholder="Nº da reserva" style={ip} /></Fl>
-          {!editId && matchedClient && matchedClient.notes.length > 0 && (
-            <div style={{ gridColumn: "1/-1", padding: "10px 14px", borderRadius: 10, background: "#fffbeb", border: "2px solid #fde68a", fontSize: 12, color: "#92400e", fontWeight: 700, display: "flex", alignItems: "center", gap: 8, lineHeight: 1.4 }}>
-              <div style={{ color: "#f59e0b", display: "flex" }}><IStar /></div>
-              <div>Cliente <b>{matchedClient.client_name}</b> está cadastrado — <b>{matchedClient.notes.length} nota{matchedClient.notes.length !== 1 ? "s" : ""}</b> será{matchedClient.notes.length !== 1 ? "ão" : ""} adicionada{matchedClient.notes.length !== 1 ? "s" : ""} automaticamente aos comentários ao criar o processo.</div>
-            </div>
-          )}
           <Fl label="Data de Retirada"><input type="date" value={form.data_retirada} onChange={e => updateField("data_retirada", e.target.value)} style={ip} /></Fl>
           <Fl label="Data de Carregamento"><input type="date" value={form.data_carregamento} onChange={e => updateField("data_carregamento", e.target.value)} style={ip} /></Fl>
           <Fl label="Referência"><input value={form.referencia} onChange={e => updateField("referencia", e.target.value)} placeholder="REF." style={ip} /></Fl>
@@ -385,10 +383,26 @@ export default function Page() {
           <Fl label="Tipo de Contêiner"><select value={form.tipo_container} onChange={e => updateField("tipo_container", e.target.value)} style={sl}>{CTYPES.map(t => <option key={t} value={t}>{t}</option>)}</select></Fl>
           <Fl label="Etapa" span><div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>{STAGES.map(s => <button key={s.key} onClick={() => updateField("stage", s.key)} style={{ padding: "6px 14px", borderRadius: 9, fontSize: 12, fontWeight: 800, border: form.stage === s.key ? `3px solid ${s.color}` : "2px solid #e4e4ec", background: form.stage === s.key ? s.bg : "#fff", color: form.stage === s.key ? s.color : "#bbb", cursor: "pointer", display: "flex", alignItems: "center", gap: 3 }}>{s.icon} {s.label}</button>)}</div></Fl>
           <Fl label="Comentários" span><textarea value={form.comentarios} onChange={e => updateField("comentarios", e.target.value)} placeholder="Observações, notas, instruções..." rows={3} style={{ ...ip, resize: "vertical" }} /></Fl>
+          {!editId && matchedClient && matchedClient.notes.length > 0 && (
+            <div style={{ gridColumn: "1/-1", padding: "14px 16px", borderRadius: 12, background: "linear-gradient(135deg,#fffbeb,#fef3c7)", border: "2px solid #f59e0b" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, color: "#92400e", fontSize: 12, fontWeight: 900, textTransform: "uppercase", letterSpacing: ".05em" }}>
+                <IStar /> Particularidades de "{matchedClient.client_name}" — {matchedClient.notes.length} nota{matchedClient.notes.length !== 1 ? "s" : ""}
+              </div>
+              <div style={{ fontSize: 11, color: "#92400e", marginBottom: 10, fontWeight: 700, fontStyle: "italic" }}>Será{matchedClient.notes.length !== 1 ? "ão" : ""} adicionada{matchedClient.notes.length !== 1 ? "s" : ""} automaticamente aos comentários ao criar o processo:</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {matchedClient.notes.map((n, i) => (
+                  <div key={n.id} style={{ display: "flex", gap: 8, padding: "10px 12px", background: "#fff", border: "1px solid #fde68a", borderLeft: "4px solid #f59e0b", borderRadius: 8 }}>
+                    <span style={{ fontSize: 11, fontWeight: 900, color: "#f59e0b", fontFamily: "var(--fm)", flexShrink: 0 }}>#{i + 1}</span>
+                    <div style={{ flex: 1, fontSize: 13, color: "#444", lineHeight: 1.5, fontWeight: 600, whiteSpace: "pre-wrap" }}>{n.text}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
-          <button onClick={closeForm} style={{ padding: "10px 20px", borderRadius: 10, background: "#fff", border: "2px solid #e4e4ec", color: "#888", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Cancelar</button>
-          <button onClick={saveCard} style={{ padding: "10px 28px", borderRadius: 10, background: "linear-gradient(135deg,#6366f1,#8b5cf6)", border: "none", color: "#fff", fontSize: 13, fontWeight: 800, cursor: "pointer", opacity: (!form.exportador || !form.reserva) ? 0.4 : 1, boxShadow: "0 4px 16px rgba(99,102,241,.25)" }}>{editId ? "Salvar Alterações" : "Criar Processo"}</button>
+          <button onClick={closeForm} disabled={saving} style={{ padding: "10px 20px", borderRadius: 10, background: "#fff", border: "2px solid #e4e4ec", color: "#888", fontSize: 13, fontWeight: 700, cursor: saving ? "not-allowed" : "pointer", opacity: saving ? 0.5 : 1 }}>Cancelar</button>
+          <button onClick={saveCard} disabled={saving || !form.exportador || !form.reserva} style={{ padding: "10px 28px", borderRadius: 10, background: "linear-gradient(135deg,#6366f1,#8b5cf6)", border: "none", color: "#fff", fontSize: 13, fontWeight: 800, cursor: saving ? "wait" : "pointer", opacity: (saving || !form.exportador || !form.reserva) ? 0.4 : 1, boxShadow: "0 4px 16px rgba(99,102,241,.25)" }}>{saving ? "Salvando..." : (editId ? "Salvar Alterações" : "Criar Processo")}</button>
         </div>
       </Modal>
 
