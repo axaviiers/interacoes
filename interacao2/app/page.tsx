@@ -32,6 +32,8 @@ const STAGES: { key: Stage; label: string; icon: string; color: string; bg: stri
   { key: "contato_terminal", label: "Contato Terminal", icon: "📞", color: "#7c3aed", bg: "#f5f3ff" },
   { key: "aguardando", label: "Aguard. Estratégia", icon: "⏳", color: "#db2777", bg: "#fdf2f8" },
   { key: "aguardando_data_liberacao", label: "Aguard. Data Liberação", icon: "📅", color: "#0891b2", bg: "#ecfeff" },
+  { key: "aguardando_vistoria", label: "Aguard. Vistoria", icon: "🔍", color: "#f59e0b", bg: "#fffbeb" },
+  { key: "aguardando_retirada", label: "Aguard. Retirada", icon: "🚚", color: "#ea580c", bg: "#fff7ed" },
   { key: "liberado", label: "Liberado", icon: "✅", color: "#059669", bg: "#ecfdf5" },
   { key: "concluido", label: "Concluído", icon: "📦", color: "#0284c7", bg: "#f0f9ff" },
 ];
