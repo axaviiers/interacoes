@@ -12,6 +12,8 @@ export type Stage =
   | "contato_terminal"
   | "aguardando"
   | "aguardando_data_liberacao"
+  | "aguardando_vistoria"
+  | "aguardando_retirada"
   | "liberado"
   | "concluido";
 
