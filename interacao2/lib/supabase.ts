@@ -59,6 +59,22 @@ export interface ClientSpecific {
   updated_at: string;
 }
 
+export type MinutaStatus = "pendente" | "resolvida";
+
+export interface Minuta {
+  id: string;
+  booking: string;
+  data_vencimento: string;
+  exportador: string | null;
+  observacao: string | null;
+  status: MinutaStatus;
+  created_by: string | null;
+  resolved_by: string | null;
+  resolved_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 // ═══ PROCESSES ═══
 
 export async function getProcesses(): Promise<ContainerProcess[]> {
@@ -197,7 +213,61 @@ export async function findClientByName(
   return { ...row, notes: Array.isArray(row.notes) ? row.notes : [] } as ClientSpecific;
 }
 
+// ═══ MINUTAS (Controle de Minuta) ═══
+
+export async function getMinutas(): Promise<Minuta[]> {
+  const { data, error } = await supabase
+    .from("minutas")
+    .select("*")
+    .order("data_vencimento", { ascending: true })
+    .order("created_at", { ascending: true });
+  if (error) throw error;
+  return (data || []) as Minuta[];
+}
+
+export async function createMinuta(
+  m: Pick<Minuta, "booking" | "data_vencimento" | "exportador" | "observacao" | "created_by">
+): Promise<Minuta> {
+  const { data, error } = await supabase
+    .from("minutas")
+    .insert({ ...m, status: "pendente" })
+    .select()
+    .single();
+  if (error) throw error;
+  return data as Minuta;
+}
+
+export async function updateMinuta(
+  id: string,
+  updates: Partial<Minuta>
+): Promise<Minuta> {
+  const { data, error } = await supabase
+    .from("minutas")
+    .update({ ...updates, updated_at: new Date().toISOString() })
+    .eq("id", id)
+    .select()
+    .single();
+  if (error) throw error;
+  return data as Minuta;
+}
+
+export async function deleteMinuta(id: string): Promise<void> {
+  const { error } = await supabase.from("minutas").delete().eq("id", id);
+  if (error) throw error;
+}
+
 // ═══ REALTIME ═══
+
+export function subscribeToMinutas(callback: (payload: any) => void) {
+  return supabase
+    .channel("minutas_changes")
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "minutas" },
+      callback
+    )
+    .subscribe();
+}
 
 export function subscribeToProcesses(callback: (payload: any) => void) {
   return supabase

@@ -17,12 +17,21 @@ import {
   updateClientSpecific,
   deleteClientSpecific,
   subscribeToClientSpecifics,
+  getMinutas,
+  createMinuta,
+  updateMinuta,
+  deleteMinuta,
+  subscribeToMinutas,
 } from "@/lib/supabase";
-import type { ContainerProcess, ActivityLog, Stage, ClientSpecific, ClientNote } from "@/lib/supabase";
+import type { ContainerProcess, ActivityLog, Stage, ClientSpecific, ClientNote, Minuta } from "@/lib/supabase";
 
 const AUTO_DELETE_MS = 2 * 60 * 60 * 1000;
-const today = () => new Date().toISOString().slice(0, 10);
-const tomorrow = () => { const d = new Date(); d.setDate(d.getDate() + 1); return d.toISOString().slice(0, 10); };
+// Datas no fuso local (antes usava UTC e depois das 21h virava o dia seguinte)
+const localISO = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const today = () => localISO(new Date());
+const tomorrow = () => { const d = new Date(); d.setDate(d.getDate() + 1); return localISO(d); };
+const daysUntil = (d: string) => Math.round((new Date(d + "T12:00:00").getTime() - new Date(today() + "T12:00:00").getTime()) / 86400000);
+const weekdayLabel = (d: string) => { const s = new Date(d + "T12:00:00").toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "2-digit", year: "numeric" }); return s.charAt(0).toUpperCase() + s.slice(1); };
 const isToday = (d: string | null) => d === today();
 const isTomorrow = (d: string | null) => d === tomorrow();
 const isUrgent = (d: string | null) => isToday(d) || isTomorrow(d);
@@ -60,6 +69,10 @@ const IMenu = () => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" 
 const IShield = () => <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>;
 const ITimer = () => <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2"/><path d="M5 3L2 6"/><path d="M22 6l-3-3"/><line x1="12" y1="1" x2="12" y2="3"/></svg>;
 const IStar = () => <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>;
+const IDoc = () => <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/></svg>;
+const IBox = () => <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>;
+const ICheck = () => <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>;
+const IUndo = () => <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10"/></svg>;
 const IUsers = () => <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>;
 
 const ip: React.CSSProperties = { width: "100%", padding: "10px 14px", fontSize: 14, border: "2px solid #e2e2ea", borderRadius: 10, background: "#fff", color: "#1a1a2e", outline: "none", fontFamily: "'Nunito',sans-serif", boxSizing: "border-box", fontWeight: 600 };
@@ -238,11 +251,210 @@ function ClientsModal({ open, onClose, clients, userName, onChanged }: { open: b
   );
 }
 
+// ══════════ CONTROLE DE MINUTA ══════════
+const urgencyStyle = (d: string) => {
+  const n = daysUntil(d);
+  if (n < 0) return { color: "#dc2626", bg: "#fef2f2", border: "#fca5a5", tag: "VENCIDA", icon: "🚨" };
+  if (n === 0) return { color: "#dc2626", bg: "#fff5f5", border: "#fca5a5", tag: "VENCE HOJE", icon: "🔥" };
+  if (n === 1) return { color: "#ea580c", bg: "#fff7ed", border: "#fdba74", tag: "VENCE AMANHÃ", icon: "⏰" };
+  if (n <= 3) return { color: "#d97706", bg: "#fffbeb", border: "#fde68a", tag: `EM ${n} DIAS`, icon: "📅" };
+  return { color: "#0d9488", bg: "#f0fdfa", border: "#99f6e4", tag: `EM ${n} DIAS`, icon: "📅" };
+};
+
+function MinutasView({ minutas, userName, onChanged }: { minutas: Minuta[]; userName: string; onChanged: () => void; }) {
+  const empty = { booking: "", data_vencimento: "", exportador: "", observacao: "" };
+  const [nf, setNf] = useState(empty);
+  const [busy, setBusy] = useState(false);
+  const [q, setQ] = useState("");
+  const [filter, setFilter] = useState<"todas" | "vencidas" | "hoje" | "amanha" | "semana">("todas");
+  const [showResolved, setShowResolved] = useState(false);
+  const [edit, setEdit] = useState<Minuta | null>(null);
+  const [ef, setEf] = useState(empty);
+  const [delId, setDelId] = useState<string | null>(null);
+
+  const pend = minutas.filter(m => m.status === "pendente");
+  const resolved = minutas.filter(m => m.status === "resolvida").sort((a, b) => (b.resolved_at || "").localeCompare(a.resolved_at || ""));
+  const cVenc = pend.filter(m => daysUntil(m.data_vencimento) < 0).length;
+  const cHoje = pend.filter(m => daysUntil(m.data_vencimento) === 0).length;
+  const cAmanha = pend.filter(m => daysUntil(m.data_vencimento) === 1).length;
+  const cSemana = pend.filter(m => { const n = daysUntil(m.data_vencimento); return n >= 0 && n <= 7; }).length;
+
+  const matchQ = (m: Minuta) => { if (!q) return true; const s = q.toLowerCase(); return [m.booking, m.exportador, m.observacao, m.created_by].some(v => v?.toLowerCase().includes(s)); };
+  const visible = pend.filter(m => {
+    const n = daysUntil(m.data_vencimento);
+    if (filter === "vencidas" && n >= 0) return false;
+    if (filter === "hoje" && n !== 0) return false;
+    if (filter === "amanha" && n !== 1) return false;
+    if (filter === "semana" && (n < 0 || n > 7)) return false;
+    return matchQ(m);
+  });
+
+  // Vencidas ficam num grupo só no topo; as demais separadas por dia
+  const groups = useMemo(() => {
+    const out: { key: string; title: string; date: string | null; items: Minuta[] }[] = [];
+    const overdue = visible.filter(m => daysUntil(m.data_vencimento) < 0);
+    if (overdue.length) out.push({ key: "vencidas", title: "Vencidas", date: null, items: overdue });
+    const byDay: Record<string, Minuta[]> = {};
+    visible.filter(m => daysUntil(m.data_vencimento) >= 0).forEach(m => { (byDay[m.data_vencimento] ||= []).push(m); });
+    Object.keys(byDay).sort().forEach(d => {
+      const n = daysUntil(d);
+      out.push({ key: d, title: n === 0 ? "Hoje" : n === 1 ? "Amanhã" : weekdayLabel(d).split(",")[0], date: d, items: byDay[d] });
+    });
+    return out;
+  }, [visible]);
+
+  const dupPending = (booking: string, ignoreId?: string) => pend.find(m => m.id !== ignoreId && m.booking.trim().toUpperCase() === booking.trim().toUpperCase());
+
+  const add = async () => {
+    const booking = nf.booking.trim().toUpperCase();
+    if (!booking || !nf.data_vencimento || busy) return;
+    const dup = dupPending(booking);
+    if (dup && !confirm(`O booking ${booking} já tem minuta pendente vencendo em ${ff(dup.data_vencimento)}. Cadastrar mesmo assim?`)) return;
+    setBusy(true);
+    try {
+      await createMinuta({ booking, data_vencimento: nf.data_vencimento, exportador: nf.exportador.trim() || null, observacao: nf.observacao.trim() || null, created_by: userName });
+      await addActivity(`📄 Minuta cadastrada: ${booking} — vence ${ff(nf.data_vencimento)}`, userName);
+      setNf(empty); onChanged();
+    } catch (e: any) { console.error(e); alert("Erro ao cadastrar minuta: " + (e?.message || "")); }
+    setBusy(false);
+  };
+
+  const toggleResolved = async (m: Minuta) => {
+    if (busy) return; setBusy(true);
+    try {
+      const toRes = m.status === "pendente";
+      await updateMinuta(m.id, { status: toRes ? "resolvida" : "pendente", resolved_at: toRes ? new Date().toISOString() : null, resolved_by: toRes ? userName : null });
+      await addActivity(toRes ? `✅ Minuta resolvida: ${m.booking}` : `↩️ Minuta reaberta: ${m.booking}`, userName);
+      onChanged();
+    } catch (e) { console.error(e); }
+    setBusy(false);
+  };
+
+  const openEdit = (m: Minuta) => { setEdit(m); setEf({ booking: m.booking, data_vencimento: m.data_vencimento, exportador: m.exportador || "", observacao: m.observacao || "" }); };
+  const saveEdit = async () => {
+    if (!edit || !ef.booking.trim() || !ef.data_vencimento || busy) return;
+    setBusy(true);
+    try {
+      const booking = ef.booking.trim().toUpperCase();
+      await updateMinuta(edit.id, { booking, data_vencimento: ef.data_vencimento, exportador: ef.exportador.trim() || null, observacao: ef.observacao.trim() || null });
+      await addActivity(`✏️ Minuta editada: ${booking}${edit.data_vencimento !== ef.data_vencimento ? ` (venc. ${ff(edit.data_vencimento)} → ${ff(ef.data_vencimento)})` : ""}`, userName);
+      setEdit(null); onChanged();
+    } catch (e: any) { console.error(e); alert("Erro ao salvar: " + (e?.message || "")); }
+    setBusy(false);
+  };
+  const doDelete = async () => {
+    const m = minutas.find(x => x.id === delId); if (!m) { setDelId(null); return; }
+    setBusy(true);
+    try { await deleteMinuta(m.id); await addActivity(`🗑️ Minuta excluída: ${m.booking}`, userName); onChanged(); } catch (e) { console.error(e); }
+    setDelId(null); setBusy(false);
+  };
+
+  const Row = ({ m }: { m: Minuta }) => {
+    const u = urgencyStyle(m.data_vencimento); const done = m.status === "resolvida"; const n = daysUntil(m.data_vencimento);
+    return (
+      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", padding: "12px 16px", background: done ? "#fafafa" : "#fff", border: "1px solid #e8e8ee", borderLeft: `6px solid ${done ? "#cbd5e1" : u.color}`, borderRadius: 12, opacity: done ? 0.75 : 1 }}>
+        <span style={{ fontSize: 16, fontWeight: 900, fontFamily: "var(--fm)", color: done ? "#94a3b8" : "#1a1a2e", textDecoration: done ? "line-through" : "none", letterSpacing: "-.01em" }}>{m.booking}</span>
+        {m.exportador && <span style={{ fontSize: 14, fontWeight: 800, color: "#444" }}>{m.exportador}</span>}
+        {!done && n < 0 && <span style={{ fontSize: 11, fontWeight: 900, fontFamily: "var(--fm)", color: "#fff", background: "#dc2626", padding: "3px 8px", borderRadius: 6, animation: "pulse 1.5s infinite" }}>⚠️ {fd(m.data_vencimento)} · {Math.abs(n)}d atrás</span>}
+        {done && <span style={{ fontSize: 11, fontWeight: 800, color: "#059669", background: "#ecfdf5", padding: "3px 8px", borderRadius: 6 }}>✅ venc. {fd(m.data_vencimento)} · resolvida {m.resolved_by ? `por ${m.resolved_by.split(" ")[0]}` : ""} {m.resolved_at ? ago(m.resolved_at) + " atrás" : ""}</span>}
+        {m.observacao && <span style={{ fontSize: 12, color: "#888", fontWeight: 600, fontStyle: "italic", flexBasis: "100%", order: 10 }}>💬 {m.observacao}</span>}
+        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
+          {m.created_by && <span className="desk" style={{ fontSize: 11, color: "#aaa", fontWeight: 700, marginRight: 4 }}>{m.created_by.split(" ")[0]} · {ago(m.created_at)}</span>}
+          <button onClick={() => toggleResolved(m)} disabled={busy} title={done ? "Reabrir" : "Marcar como resolvida"} style={{ display: "flex", alignItems: "center", gap: 4, padding: "6px 10px", borderRadius: 8, fontSize: 12, fontWeight: 800, cursor: "pointer", background: done ? "#f1f5f9" : "#ecfdf5", border: done ? "1px solid #e2e8f0" : "1px solid #a7f3d0", color: done ? "#64748b" : "#059669" }}>{done ? <><IUndo />Reabrir</> : <><ICheck />Resolvida</>}</button>
+          {!done && <button onClick={() => openEdit(m)} title="Editar" style={{ background: "#f0eeff", border: "1px solid #ddd8ff", color: "#6366f1", cursor: "pointer", padding: "6px 8px", borderRadius: 8, display: "flex" }}><IEdit /></button>}
+          <button onClick={() => setDelId(m.id)} title="Excluir" style={{ background: "#fef2f2", border: "1px solid #fecaca", color: "#ef4444", cursor: "pointer", padding: "6px 8px", borderRadius: 8, display: "flex" }}><ITrash /></button>
+        </div>
+      </div>
+    );
+  };
+
+  const canAdd = !!nf.booking.trim() && !!nf.data_vencimento && !busy;
+  const chips: { key: typeof filter; label: string; color: string; bg: string }[] = [
+    { key: "todas", label: `Todas pendentes (${pend.length})`, color: "#0d9488", bg: "#f0fdfa" },
+    { key: "vencidas", label: `🚨 Vencidas (${cVenc})`, color: "#dc2626", bg: "#fef2f2" },
+    { key: "hoje", label: `🔥 Hoje (${cHoje})`, color: "#ef4444", bg: "#fef2f2" },
+    { key: "amanha", label: `⏰ Amanhã (${cAmanha})`, color: "#ea580c", bg: "#fff7ed" },
+    { key: "semana", label: `📅 Próx. 7 dias (${cSemana})`, color: "#d97706", bg: "#fffbeb" },
+  ];
+
+  return (
+    <div style={{ padding: "12px 20px 32px" }}>
+      {/* Cadastro rápido */}
+      <div style={{ background: "#fff", border: "2px solid #ccfbf1", borderRadius: 16, padding: 16, marginBottom: 14 }}>
+        <div style={{ fontSize: 12, fontWeight: 900, color: "#0f766e", textTransform: "uppercase", letterSpacing: ".06em", marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}><IDoc />Cadastrar minuta</div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))", gap: 10, alignItems: "end" }}>
+          <Fl label="Booking *"><input value={nf.booking} onChange={e => setNf(f => ({ ...f, booking: e.target.value }))} onKeyDown={e => e.key === "Enter" && add()} placeholder="Nº do booking" style={{ ...ip, fontFamily: "var(--fm)", textTransform: "uppercase" }} /></Fl>
+          <Fl label="Vencimento da minuta *"><input type="date" value={nf.data_vencimento} onChange={e => setNf(f => ({ ...f, data_vencimento: e.target.value }))} onKeyDown={e => e.key === "Enter" && add()} style={ip} /></Fl>
+          <Fl label="Exportador"><input value={nf.exportador} onChange={e => setNf(f => ({ ...f, exportador: e.target.value }))} onKeyDown={e => e.key === "Enter" && add()} placeholder="Opcional" style={ip} /></Fl>
+          <Fl label="Observação"><input value={nf.observacao} onChange={e => setNf(f => ({ ...f, observacao: e.target.value }))} onKeyDown={e => e.key === "Enter" && add()} placeholder="Opcional" style={ip} /></Fl>
+          <button onClick={add} disabled={!canAdd} style={{ padding: "11px 18px", borderRadius: 10, background: "linear-gradient(135deg,#0d9488,#14b8a6)", border: "none", color: "#fff", fontSize: 13, fontWeight: 800, cursor: canAdd ? "pointer" : "not-allowed", opacity: canAdd ? 1 : 0.4, display: "flex", alignItems: "center", justifyContent: "center", gap: 4, boxShadow: "0 4px 16px rgba(13,148,136,.25)" }}><IPlus />{busy ? "Salvando..." : "Adicionar"}</button>
+        </div>
+      </div>
+
+      {/* Filtros + busca */}
+      <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginBottom: 14 }}>
+        {chips.map(c => (<button key={c.key} onClick={() => setFilter(c.key)} style={{ padding: "6px 12px", borderRadius: 9, fontSize: 12, fontWeight: 800, border: filter === c.key ? `2px solid ${c.color}` : "2px solid #e4e4ec", background: filter === c.key ? c.bg : "#fff", color: filter === c.key ? c.color : "#bbb", cursor: "pointer", whiteSpace: "nowrap" }}>{c.label}</button>))}
+        <div style={{ position: "relative", marginLeft: "auto", minWidth: 200, flex: "0 1 260px" }}><div style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "#bbb" }}><ISearch /></div><input value={q} onChange={e => setQ(e.target.value)} placeholder="Buscar booking, exportador..." style={{ ...ip, padding: "8px 12px 8px 34px", fontSize: 13 }} /></div>
+      </div>
+
+      {/* Lista separada por dia */}
+      {groups.length === 0 ? (
+        <div style={{ textAlign: "center", padding: "50px 20px", color: "#bbb" }}><div style={{ fontSize: 42, marginBottom: 10 }}>📄</div><div style={{ fontSize: 16, fontWeight: 800 }}>{pend.length === 0 ? "Nenhuma minuta pendente" : "Nenhuma minuta nesse filtro"}</div></div>
+      ) : groups.map(g => {
+        const u = g.date ? urgencyStyle(g.date) : urgencyStyle("1900-01-01");
+        return (
+          <div key={g.key} style={{ marginBottom: 18, animation: "fUp .25s both" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", marginBottom: 8, borderRadius: 12, background: u.bg, border: `2px solid ${u.border}` }}>
+              <span style={{ fontSize: 18 }}>{u.icon}</span>
+              <span style={{ fontSize: 16, fontWeight: 900, color: u.color, letterSpacing: "-.02em" }}>{g.title}</span>
+              {g.date && <span style={{ fontSize: 13, fontWeight: 800, color: "#555", fontFamily: "var(--fm)" }}>{ff(g.date)}</span>}
+              {g.date && daysUntil(g.date) > 1 && <span className="desk" style={{ fontSize: 10, fontWeight: 900, color: u.color, background: "#fff", padding: "2px 8px", borderRadius: 6, letterSpacing: ".05em" }}>{u.tag}</span>}
+              <span style={{ marginLeft: "auto", fontSize: 12, fontWeight: 900, color: "#fff", background: u.color, padding: "3px 10px", borderRadius: 20, whiteSpace: "nowrap", flexShrink: 0 }}>{g.items.length} minuta{g.items.length !== 1 ? "s" : ""}</span>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, paddingLeft: 6 }}>{g.items.map(m => <Row key={m.id} m={m} />)}</div>
+          </div>
+        );
+      })}
+
+      {/* Resolvidas */}
+      {resolved.length > 0 && (
+        <div style={{ marginTop: 10 }}>
+          <button onClick={() => setShowResolved(!showResolved)} style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 10, background: "#fff", border: "2px solid #e4e4ec", color: "#888", fontSize: 12, fontWeight: 800, cursor: "pointer" }}>✅ Resolvidas ({resolved.length}) <IChev d={showResolved ? "up" : "down"} /></button>
+          {showResolved && <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 10 }}>{resolved.filter(matchQ).map(m => <Row key={m.id} m={m} />)}</div>}
+        </div>
+      )}
+
+      <Modal open={!!edit} onClose={() => setEdit(null)} title="✏️ Editar Minuta" w={480}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px 16px" }}>
+          <Fl label="Booking *"><input value={ef.booking} onChange={e => setEf(f => ({ ...f, booking: e.target.value }))} style={{ ...ip, fontFamily: "var(--fm)", textTransform: "uppercase" }} /></Fl>
+          <Fl label="Vencimento *"><input type="date" value={ef.data_vencimento} onChange={e => setEf(f => ({ ...f, data_vencimento: e.target.value }))} style={ip} /></Fl>
+          <Fl label="Exportador" span><input value={ef.exportador} onChange={e => setEf(f => ({ ...f, exportador: e.target.value }))} style={ip} /></Fl>
+          <Fl label="Observação" span><textarea value={ef.observacao} onChange={e => setEf(f => ({ ...f, observacao: e.target.value }))} rows={3} style={{ ...ip, resize: "vertical" }} /></Fl>
+        </div>
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
+          <button onClick={() => setEdit(null)} style={{ padding: "10px 20px", borderRadius: 10, background: "#fff", border: "2px solid #e4e4ec", color: "#888", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Cancelar</button>
+          <button onClick={saveEdit} disabled={busy || !ef.booking.trim() || !ef.data_vencimento} style={{ padding: "10px 24px", borderRadius: 10, background: "linear-gradient(135deg,#0d9488,#14b8a6)", border: "none", color: "#fff", fontSize: 13, fontWeight: 800, cursor: "pointer", opacity: (busy || !ef.booking.trim() || !ef.data_vencimento) ? 0.4 : 1 }}>{busy ? "Salvando..." : "Salvar"}</button>
+        </div>
+      </Modal>
+
+      <Modal open={!!delId} onClose={() => setDelId(null)} title="⚠️ Excluir Minuta" w={400}>
+        <p style={{ color: "#555", fontSize: 14, fontWeight: 600, marginBottom: 16 }}>Excluir a minuta do booking <b style={{ fontFamily: "var(--fm)" }}>{minutas.find(m => m.id === delId)?.booking}</b>? Se ela só foi resolvida, prefira marcar como <b>Resolvida</b>.</p>
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          <button onClick={() => setDelId(null)} style={{ padding: "10px 20px", borderRadius: 10, background: "#fff", border: "2px solid #e4e4ec", color: "#888", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Cancelar</button>
+          <button onClick={doDelete} style={{ padding: "10px 24px", borderRadius: 10, background: "#ef4444", border: "none", color: "#fff", fontSize: 13, fontWeight: 800, cursor: "pointer" }}>Excluir</button>
+        </div>
+      </Modal>
+    </div>
+  );
+}
+
 export default function Page() {
   const [user, setUser] = useState<AppUser | null>(null);
   const [cards, setCards] = useState<ContainerProcess[]>([]);
   const [activityList, setActivityList] = useState<ActivityLog[]>([]);
   const [clientSpecs, setClientSpecs] = useState<ClientSpecific[]>([]);
+  const [minutas, setMinutas] = useState<Minuta[]>([]);
+  const [view, setView] = useState<"liberacao" | "minutas">("liberacao");
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [showClients, setShowClients] = useState(false);
@@ -259,16 +471,20 @@ export default function Page() {
 
   useEffect(() => {
     if (!user) return; let m = true;
-    const load = async () => { try { const [p, a, cs] = await Promise.all([getProcesses(), getActivity(), getClientSpecifics()]); if (m) { setCards(p); setActivityList(a); setClientSpecs(cs); } } catch (e) { console.error(e); } if (m) setLoading(false); };
+    const load = async () => { try { const [p, a, cs] = await Promise.all([getProcesses(), getActivity(), getClientSpecifics()]); if (m) { setCards(p); setActivityList(a); setClientSpecs(cs); } } catch (e) { console.error(e); } try { const mn = await getMinutas(); if (m) setMinutas(mn); } catch (e) { console.error("Minutas: rode supabase/minutas.sql no Supabase", e); } if (m) setLoading(false); };
     load();
     const s1 = subscribeToProcesses(() => { getProcesses().then(d => m && setCards(d)).catch(console.error); });
     const s2 = subscribeToActivity(() => { getActivity().then(d => m && setActivityList(d)).catch(console.error); });
     const s3 = subscribeToClientSpecifics(() => { getClientSpecifics().then(d => m && setClientSpecs(d)).catch(console.error); });
+    const s4 = subscribeToMinutas(() => { getMinutas().then(d => m && setMinutas(d)).catch(console.error); });
     const iv = setInterval(() => { setTick(t => t + 1); autoDeleteLiberated().catch(console.error); }, 30000);
-    return () => { m = false; s1.unsubscribe(); s2.unsubscribe(); s3.unsubscribe(); clearInterval(iv); };
+    return () => { m = false; s1.unsubscribe(); s2.unsubscribe(); s3.unsubscribe(); s4.unsubscribe(); clearInterval(iv); };
   }, [user]);
 
   const reloadClients = () => { getClientSpecifics().then(setClientSpecs).catch(console.error); };
+  const reloadMinutas = () => { getMinutas().then(setMinutas).catch(console.error); };
+  const minPend = minutas.filter(x => x.status === "pendente");
+  const minAlert = minPend.filter(x => daysUntil(x.data_vencimento) <= 0).length;
 
   // Cliente que bate com o exportador digitado no form (lookup local)
   const matchedClient = useMemo(() => {
@@ -320,7 +536,9 @@ export default function Page() {
     return [c.exportador, c.reserva, c.transportadora, c.referencia, c.comentarios].some(v => v?.toLowerCase().includes(q));
   });
 
-  const exportCSV = () => { const h = ["Etapa","Data Retirada","Data Carregamento","Exportador","Reserva","Qtd","Tipo","Transportadora","REF","Comentários"]; const r = cards.map(c => [STAGES.find(s => s.key === c.stage)?.label, c.data_retirada, c.data_carregamento, c.exportador, c.reserva, c.quantidade, c.tipo_container, c.transportadora, c.referencia, c.comentarios]); const csv = [h, ...r].map(x => x.map(c => `"${c || ""}"`).join(",")).join("\n"); const b = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" }); const a = document.createElement("a"); a.href = URL.createObjectURL(b); a.download = `interacao-${today()}.csv`; a.click(); };
+  const exportMinutasCSV = () => { const h = ["Booking","Vencimento","Exportador","Observação","Status","Cadastrado por","Resolvido por"]; const r = [...minutas].sort((a, b) => a.data_vencimento.localeCompare(b.data_vencimento)).map(x => [x.booking, x.data_vencimento, x.exportador, x.observacao, x.status, x.created_by, x.resolved_by]); const csv = [h, ...r].map(x => x.map(c => `"${(c || "").toString().replace(/"/g, '""')}"`).join(",")).join("\n"); const b = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" }); const a = document.createElement("a"); a.href = URL.createObjectURL(b); a.download = `minutas-${today()}.csv`; a.click(); };
+  const exportProcCSV = () => { const h = ["Etapa","Data Retirada","Data Carregamento","Exportador","Reserva","Qtd","Tipo","Transportadora","REF","Comentários"]; const r = cards.map(c => [STAGES.find(s => s.key === c.stage)?.label, c.data_retirada, c.data_carregamento, c.exportador, c.reserva, c.quantidade, c.tipo_container, c.transportadora, c.referencia, c.comentarios]); const csv = [h, ...r].map(x => x.map(c => `"${c || ""}"`).join(",")).join("\n"); const b = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" }); const a = document.createElement("a"); a.href = URL.createObjectURL(b); a.download = `interacao-${today()}.csv`; a.click(); };
+  const exportCSV = () => view === "minutas" ? exportMinutasCSV() : exportProcCSV();
 
   const totalC = cards.reduce((a, c) => a + (c.quantidade || 0), 0);
   const todayCount = cards.filter(c => isToday(c.data_retirada)).length;
@@ -336,14 +554,14 @@ export default function Page() {
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <div style={{ width: 40, height: 40, borderRadius: 12, background: "linear-gradient(135deg,#6366f1,#a855f7)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 18, boxShadow: "0 4px 16px rgba(99,102,241,.25)" }}>📦</div>
-            <div><h1 style={{ fontSize: 20, fontWeight: 900, letterSpacing: "-.03em", lineHeight: 1 }}>Inter<span style={{ color: "#6366f1" }}>ação</span></h1><p style={{ fontSize: 11, color: "#888", fontWeight: 700 }}>{cards.length} processos · {totalC} cnt{urgentCount > 0 && <span style={{ color: "#dc2626", fontWeight: 900 }}> · ⚠️ {urgentCount} urgente{urgentCount > 1 ? "s" : ""}</span>}</p></div>
+            <div><h1 style={{ fontSize: 20, fontWeight: 900, letterSpacing: "-.03em", lineHeight: 1 }}>Inter<span style={{ color: "#6366f1" }}>ação</span></h1><p style={{ fontSize: 11, color: "#888", fontWeight: 700 }}>{view === "minutas" ? <>{minPend.length} minuta{minPend.length !== 1 ? "s" : ""} pendente{minPend.length !== 1 ? "s" : ""}{minAlert > 0 && <span style={{ color: "#dc2626", fontWeight: 900 }}> · ⚠️ {minAlert} vencendo/vencida{minAlert > 1 ? "s" : ""}</span>}</> : <>{cards.length} processos · {totalC} cnt{urgentCount > 0 && <span style={{ color: "#dc2626", fontWeight: 900 }}> · ⚠️ {urgentCount} urgente{urgentCount > 1 ? "s" : ""}</span>}</>}</p></div>
           </div>
           <div className="desk" style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <div style={{ position: "relative" }}><div style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "#bbb" }}><ISearch /></div><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar exportador, reserva..." style={{ ...ip, width: 280, paddingLeft: 34, fontSize: 13, padding: "8px 12px 8px 34px", borderRadius: 10, background: "#f7f7fb", border: "2px solid #e8e8ee" }} /></div>
+            {view === "liberacao" && <div style={{ position: "relative" }}><div style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "#bbb" }}><ISearch /></div><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar exportador, reserva..." style={{ ...ip, width: 280, paddingLeft: 34, fontSize: 13, padding: "8px 12px 8px 34px", borderRadius: 10, background: "#f7f7fb", border: "2px solid #e8e8ee" }} /></div>}
             <button onClick={() => setShowClients(true)} style={{ display: "flex", alignItems: "center", gap: 4, padding: "8px 14px", borderRadius: 10, background: "#fffbeb", border: "2px solid #fde68a", color: "#d97706", fontSize: 12, fontWeight: 800, cursor: "pointer" }} title="Particularidades dos Clientes"><IStar />Clientes</button>
             <button onClick={() => setShowLog(!showLog)} style={{ display: "flex", alignItems: "center", gap: 4, padding: "8px 14px", borderRadius: 10, background: showLog ? "#f0eeff" : "#fff", border: "2px solid #e8e8ee", color: showLog ? "#6366f1" : "#888", fontSize: 12, fontWeight: 800, cursor: "pointer" }}><ILog />Log</button>
             <button onClick={exportCSV} style={{ display: "flex", alignItems: "center", gap: 4, padding: "8px 14px", borderRadius: 10, background: "#fff", border: "2px solid #e8e8ee", color: "#888", fontSize: 12, fontWeight: 800, cursor: "pointer" }}><IDown />CSV</button>
-            <button onClick={openNew} style={{ display: "flex", alignItems: "center", gap: 4, padding: "8px 18px", borderRadius: 10, background: "linear-gradient(135deg,#6366f1,#8b5cf6)", border: "none", color: "#fff", fontSize: 13, fontWeight: 800, cursor: "pointer", boxShadow: "0 4px 16px rgba(99,102,241,.3)" }}><IPlus />Novo Processo</button>
+            {view === "liberacao" && <button onClick={openNew} style={{ display: "flex", alignItems: "center", gap: 4, padding: "8px 18px", borderRadius: 10, background: "linear-gradient(135deg,#6366f1,#8b5cf6)", border: "none", color: "#fff", fontSize: 13, fontWeight: 800, cursor: "pointer", boxShadow: "0 4px 16px rgba(99,102,241,.3)" }}><IPlus />Novo Processo</button>}
             <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 12px 6px 10px", borderRadius: 10, background: "#f7f7fb", border: "2px solid #e8e8ee" }}>
               <div style={{ width: 26, height: 26, borderRadius: "50%", background: isAdmin ? "linear-gradient(135deg,#f59e0b,#ef4444)" : "linear-gradient(135deg,#6366f1,#a855f7)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 10, fontWeight: 900 }}>{user.name.split(" ").map(w => w[0]).join("").slice(0, 2)}</div>
               <div style={{ lineHeight: 1.2 }}><span style={{ fontSize: 12, fontWeight: 800, color: "#333", display: "block" }}>{user.name.split(" ")[0]}</span>{isAdmin && <span style={{ fontSize: 9, fontWeight: 900, color: "#f59e0b", display: "flex", alignItems: "center", gap: 2 }}><IShield />ADMIN</span>}</div>
@@ -352,9 +570,19 @@ export default function Page() {
           </div>
           <button className="mob" onClick={() => setMobileMenu(!mobileMenu)} style={{ background: "none", border: "none", color: "#333", cursor: "pointer", padding: 4, display: "flex" }}><IMenu /></button>
         </div>
-        {mobileMenu && (<div className="mob" style={{ padding: "12px 0", display: "flex", flexDirection: "column", gap: 8, animation: "fUp .2s ease" }}><div style={{ position: "relative" }}><div style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "#bbb" }}><ISearch /></div><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar..." style={{ ...ip, width: "100%", paddingLeft: 34, fontSize: 14, padding: "10px 12px 10px 34px" }} /></div><div style={{ display: "flex", gap: 6 }}><button onClick={openNew} style={{ flex: 1, padding: "10px 0", borderRadius: 10, background: "linear-gradient(135deg,#6366f1,#8b5cf6)", border: "none", color: "#fff", fontSize: 13, fontWeight: 800, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}><IPlus />Novo</button><button onClick={() => { setShowClients(true); setMobileMenu(false); }} style={{ flex: 1, padding: "10px 0", borderRadius: 10, background: "#fffbeb", border: "2px solid #fde68a", color: "#d97706", fontSize: 13, fontWeight: 800, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}><IStar />Clientes</button></div><div style={{ display: "flex", gap: 6 }}><button onClick={() => { setShowLog(!showLog); setMobileMenu(false); }} style={{ flex: 1, padding: "10px 0", borderRadius: 10, background: "#f7f7fb", border: "2px solid #e8e8ee", color: "#888", fontSize: 13, fontWeight: 800, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}><ILog />Log</button><button onClick={exportCSV} style={{ flex: 1, padding: "10px 0", borderRadius: 10, background: "#f7f7fb", border: "2px solid #e8e8ee", color: "#888", fontSize: 13, fontWeight: 800, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}><IDown />CSV</button></div><div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 10px", borderRadius: 10, background: "#f7f7fb" }}><span style={{ fontSize: 13, fontWeight: 800, color: "#333" }}>{user.name}</span><button onClick={() => setUser(null)} style={{ background: "none", border: "none", color: "#999", cursor: "pointer", fontSize: 12 }}><IOut /></button></div></div>)}
+        {mobileMenu && (<div className="mob" style={{ padding: "12px 0", display: "flex", flexDirection: "column", gap: 8, animation: "fUp .2s ease" }}><div style={{ position: "relative" }}><div style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "#bbb" }}><ISearch /></div><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar..." style={{ ...ip, width: "100%", paddingLeft: 34, fontSize: 14, padding: "10px 12px 10px 34px" }} /></div><div style={{ display: "flex", gap: 6 }}>{view === "liberacao" && <button onClick={openNew} style={{ flex: 1, padding: "10px 0", borderRadius: 10, background: "linear-gradient(135deg,#6366f1,#8b5cf6)", border: "none", color: "#fff", fontSize: 13, fontWeight: 800, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}><IPlus />Novo</button>}<button onClick={() => { setShowClients(true); setMobileMenu(false); }} style={{ flex: 1, padding: "10px 0", borderRadius: 10, background: "#fffbeb", border: "2px solid #fde68a", color: "#d97706", fontSize: 13, fontWeight: 800, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}><IStar />Clientes</button></div><div style={{ display: "flex", gap: 6 }}><button onClick={() => { setShowLog(!showLog); setMobileMenu(false); }} style={{ flex: 1, padding: "10px 0", borderRadius: 10, background: "#f7f7fb", border: "2px solid #e8e8ee", color: "#888", fontSize: 13, fontWeight: 800, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}><ILog />Log</button><button onClick={exportCSV} style={{ flex: 1, padding: "10px 0", borderRadius: 10, background: "#f7f7fb", border: "2px solid #e8e8ee", color: "#888", fontSize: 13, fontWeight: 800, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}><IDown />CSV</button></div><div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 10px", borderRadius: 10, background: "#f7f7fb" }}><span style={{ fontSize: 13, fontWeight: 800, color: "#333" }}>{user.name}</span><button onClick={() => setUser(null)} style={{ background: "none", border: "none", color: "#999", cursor: "pointer", fontSize: 12 }}><IOut /></button></div></div>)}
       </header>
 
+      <div style={{ padding: "14px 20px 0" }}>
+        <div style={{ display: "inline-flex", gap: 4, padding: 4, background: "#fff", border: "2px solid #eeeef2", borderRadius: 14 }}>
+          <button onClick={() => setView("liberacao")} style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 10, border: "none", fontSize: 13, fontWeight: 800, cursor: "pointer", background: view === "liberacao" ? "linear-gradient(135deg,#6366f1,#8b5cf6)" : "transparent", color: view === "liberacao" ? "#fff" : "#888" }}><IBox /><span className="desk">Liberação de Contêineres</span><span className="mob">Liberação</span><span style={{ fontSize: 11, fontWeight: 900, padding: "1px 8px", borderRadius: 20, background: view === "liberacao" ? "rgba(255,255,255,.25)" : "#f0f0f5", color: view === "liberacao" ? "#fff" : "#888" }}>{cards.length}</span></button>
+          <button onClick={() => setView("minutas")} style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 10, border: "none", fontSize: 13, fontWeight: 800, cursor: "pointer", background: view === "minutas" ? "linear-gradient(135deg,#0d9488,#14b8a6)" : "transparent", color: view === "minutas" ? "#fff" : "#888" }}><IDoc /><span className="desk">Controle de Minuta</span><span className="mob">Minutas</span>{minAlert > 0 ? <span style={{ fontSize: 11, fontWeight: 900, padding: "1px 8px", borderRadius: 20, background: "#dc2626", color: "#fff", animation: "pulse 1.5s infinite" }}>{minAlert}</span> : <span style={{ fontSize: 11, fontWeight: 900, padding: "1px 8px", borderRadius: 20, background: view === "minutas" ? "rgba(255,255,255,.25)" : "#f0f0f5", color: view === "minutas" ? "#fff" : "#888" }}>{minPend.length}</span>}</button>
+        </div>
+      </div>
+
+      {view === "minutas" ? (
+        <MinutasView minutas={minutas} userName={user.name} onChanged={reloadMinutas} />
+      ) : (<>
       <div style={{ padding: "12px 20px 0" }}>
         <div style={{ display: "flex", gap: 5, overflowX: "auto", paddingBottom: 8 }}>
           <button onClick={() => setFilterStage("todos")} style={{ padding: "6px 16px", borderRadius: 9, fontSize: 12, fontWeight: 800, border: filterStage === "todos" ? "2px solid #6366f1" : "2px solid #e4e4ec", background: filterStage === "todos" ? "#f0eeff" : "#fff", color: filterStage === "todos" ? "#6366f1" : "#888", cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0 }}>Todos ({cards.length})</button>
@@ -372,6 +600,7 @@ export default function Page() {
         </div>
         {showLog && (<div style={{ width: 250, flexShrink: 0, marginLeft: 14, background: "#fff", borderRadius: 16, border: "2px solid #eeeef2", padding: 14, overflow: "auto", maxHeight: "calc(100vh - 180px)", position: "sticky", top: 90, animation: "slideR .25s cubic-bezier(.16,1,.3,1)" }}><h3 style={{ fontSize: 13, fontWeight: 800, color: "#888", marginBottom: 12, display: "flex", alignItems: "center", gap: 5 }}><ILog />Atividade</h3>{activityList.length === 0 ? <p style={{ fontSize: 12, color: "#ccc", textAlign: "center", padding: "14px 0" }}>Nenhuma atividade</p> : activityList.map((a, i) => (<div key={a.id} style={{ padding: "8px 0", borderBottom: i < activityList.length - 1 ? "1px solid #f5f5f8" : "none" }}><div style={{ fontSize: 12, color: "#444", lineHeight: 1.5, fontWeight: 600 }}>{a.text}</div><div style={{ fontSize: 10, color: "#bbb", marginTop: 2, fontFamily: "var(--fm)" }}>{ago(a.created_at)}</div></div>))}</div>)}
       </div>
+      </>)}
 
       <Modal open={showForm} onClose={closeForm} title={editId ? "✏️ Editar Processo" : "📋 Novo Processo"}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px 16px" }}>

@@ -85,3 +85,5 @@ $$ LANGUAGE plpgsql;
 -- 7. CRON (opcional - requer pg_cron habilitado em Database > Extensions)
 -- Se pg_cron estiver disponível, descomente e execute:
 -- SELECT cron.schedule('auto-delete-liberated', '*/30 * * * *', $$SELECT auto_delete_liberated()$$);
+
+-- 8. CONTROLE DE MINUTA → ver supabase/minutas.sql
