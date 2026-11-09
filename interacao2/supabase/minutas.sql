@@ -7,6 +7,7 @@
 CREATE TABLE IF NOT EXISTS minutas (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   booking TEXT NOT NULL,
+  depot TEXT,
   data_vencimento DATE NOT NULL,
   exportador TEXT,
   observacao TEXT,
@@ -17,6 +18,9 @@ CREATE TABLE IF NOT EXISTS minutas (
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Para bancos que já tinham a tabela antes do campo Depot:
+ALTER TABLE minutas ADD COLUMN IF NOT EXISTS depot TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_minutas_venc ON minutas(data_vencimento);
 CREATE INDEX IF NOT EXISTS idx_minutas_status ON minutas(status);

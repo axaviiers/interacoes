@@ -64,6 +64,7 @@ export type MinutaStatus = "pendente" | "resolvida";
 export interface Minuta {
   id: string;
   booking: string;
+  depot: string | null;
   data_vencimento: string;
   exportador: string | null;
   observacao: string | null;
@@ -226,7 +227,7 @@ export async function getMinutas(): Promise<Minuta[]> {
 }
 
 export async function createMinuta(
-  m: Pick<Minuta, "booking" | "data_vencimento" | "exportador" | "observacao" | "created_by">
+  m: Pick<Minuta, "booking" | "depot" | "data_vencimento" | "exportador" | "observacao" | "created_by">
 ): Promise<Minuta> {
   const { data, error } = await supabase
     .from("minutas")

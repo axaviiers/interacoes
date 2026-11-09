@@ -298,7 +298,7 @@ const urgencyStyle = (d: string) => {
 };
 
 function MinutasView({ minutas, userName, onChanged }: { minutas: Minuta[]; userName: string; onChanged: () => void; }) {
-  const empty = { booking: "", data_vencimento: "", exportador: "", observacao: "" };
+  const empty = { booking: "", depot: "", data_vencimento: "", exportador: "", observacao: "" };
   const [nf, setNf] = useState(empty);
   const [busy, setBusy] = useState(false);
   const [q, setQ] = useState("");
@@ -315,7 +315,7 @@ function MinutasView({ minutas, userName, onChanged }: { minutas: Minuta[]; user
   const cAmanha = pend.filter(m => daysUntil(m.data_vencimento) === 1).length;
   const cSemana = pend.filter(m => { const n = daysUntil(m.data_vencimento); return n >= 0 && n <= 7; }).length;
 
-  const matchQ = (m: Minuta) => { if (!q) return true; const s = q.toLowerCase(); return [m.booking, m.exportador, m.observacao, m.created_by].some(v => v?.toLowerCase().includes(s)); };
+  const matchQ = (m: Minuta) => { if (!q) return true; const s = q.toLowerCase(); return [m.booking, m.depot, m.exportador, m.observacao, m.created_by].some(v => v?.toLowerCase().includes(s)); };
   const visible = pend.filter(m => {
     const n = daysUntil(m.data_vencimento);
     if (filter === "vencidas" && n >= 0) return false;
@@ -348,7 +348,7 @@ function MinutasView({ minutas, userName, onChanged }: { minutas: Minuta[]; user
     if (dup && !confirm(`O booking ${booking} já tem minuta pendente vencendo em ${ff(dup.data_vencimento)}. Cadastrar mesmo assim?`)) return;
     setBusy(true);
     try {
-      await createMinuta({ booking, data_vencimento: nf.data_vencimento, exportador: nf.exportador.trim() || null, observacao: nf.observacao.trim() || null, created_by: userName });
+      await createMinuta({ booking, depot: nf.depot.trim() || null, data_vencimento: nf.data_vencimento, exportador: nf.exportador.trim() || null, observacao: nf.observacao.trim() || null, created_by: userName });
       await addActivity(`📄 Minuta cadastrada: ${booking} — vence ${ff(nf.data_vencimento)}`, userName);
       setNf(empty); onChanged();
     } catch (e: any) { console.error(e); alert("Erro ao cadastrar minuta: " + (e?.message || "")); }
@@ -366,13 +366,13 @@ function MinutasView({ minutas, userName, onChanged }: { minutas: Minuta[]; user
     setBusy(false);
   };
 
-  const openEdit = (m: Minuta) => { setEdit(m); setEf({ booking: m.booking, data_vencimento: m.data_vencimento, exportador: m.exportador || "", observacao: m.observacao || "" }); };
+  const openEdit = (m: Minuta) => { setEdit(m); setEf({ booking: m.booking, depot: m.depot || "", data_vencimento: m.data_vencimento, exportador: m.exportador || "", observacao: m.observacao || "" }); };
   const saveEdit = async () => {
     if (!edit || !ef.booking.trim() || !ef.data_vencimento || busy) return;
     setBusy(true);
     try {
       const booking = ef.booking.trim().toUpperCase();
-      await updateMinuta(edit.id, { booking, data_vencimento: ef.data_vencimento, exportador: ef.exportador.trim() || null, observacao: ef.observacao.trim() || null });
+      await updateMinuta(edit.id, { booking, depot: ef.depot.trim() || null, data_vencimento: ef.data_vencimento, exportador: ef.exportador.trim() || null, observacao: ef.observacao.trim() || null });
       await addActivity(`✏️ Minuta editada: ${booking}${edit.data_vencimento !== ef.data_vencimento ? ` (venc. ${ff(edit.data_vencimento)} → ${ff(ef.data_vencimento)})` : ""}`, userName);
       setEdit(null); onChanged();
     } catch (e: any) { console.error(e); alert("Erro ao salvar: " + (e?.message || "")); }
@@ -390,6 +390,7 @@ function MinutasView({ minutas, userName, onChanged }: { minutas: Minuta[]; user
     return (
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", padding: "12px 16px", background: done ? "#fafafa" : "#fff", border: "1px solid #e8e8ee", borderLeft: `6px solid ${done ? "#cbd5e1" : u.color}`, borderRadius: 12, opacity: done ? 0.75 : 1 }}>
         <span style={{ fontSize: 16, fontWeight: 900, fontFamily: "var(--fm)", color: done ? "#94a3b8" : "#1a1a2e", textDecoration: done ? "line-through" : "none", letterSpacing: "-.01em" }}>{m.booking}</span>
+        {m.depot && <span style={{ fontSize: 12, fontWeight: 800, color: done ? "#94a3b8" : "#4338ca", background: done ? "#f1f5f9" : "#eef2ff", border: `1px solid ${done ? "#e2e8f0" : "#c7d2fe"}`, padding: "3px 9px", borderRadius: 6, whiteSpace: "nowrap" }}>🏭 {m.depot}</span>}
         {m.exportador && <span style={{ fontSize: 14, fontWeight: 800, color: "#444" }}>{m.exportador}</span>}
         {(() => { const st = minutaStatus(m); const c = MIN_STATUS[st]; return <span style={{ fontSize: 11, fontWeight: 900, color: c.color, background: c.bg, border: `1px solid ${c.border}`, padding: "3px 8px", borderRadius: 6, letterSpacing: ".03em", textTransform: "uppercase", animation: st === "vencida" ? "pulse 1.5s infinite" : "none", whiteSpace: "nowrap" }}>{c.icon} {c.label}</span>; })()}
         {!done && n < 0 && <span style={{ fontSize: 11, fontWeight: 800, fontFamily: "var(--fm)", color: "#dc2626" }}>venceu {fd(m.data_vencimento)} · há {Math.abs(n)} dia{Math.abs(n) !== 1 ? "s" : ""}</span>}
@@ -420,8 +421,9 @@ function MinutasView({ minutas, userName, onChanged }: { minutas: Minuta[]; user
       {/* Cadastro rápido */}
       <div style={{ background: "#fff", border: "2px solid #ccfbf1", borderRadius: 16, padding: 16, marginBottom: 14 }}>
         <div style={{ fontSize: 12, fontWeight: 900, color: "#0f766e", textTransform: "uppercase", letterSpacing: ".06em", marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}><IDoc />Cadastrar minuta</div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))", gap: 10, alignItems: "end" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 10, alignItems: "end" }}>
           <Fl label="Booking *"><input value={nf.booking} onChange={e => setNf(f => ({ ...f, booking: e.target.value }))} onKeyDown={e => e.key === "Enter" && add()} placeholder="Nº do booking" style={{ ...ip, fontFamily: "var(--fm)", textTransform: "uppercase" }} /></Fl>
+          <Fl label="Depot"><input value={nf.depot} onChange={e => setNf(f => ({ ...f, depot: e.target.value }))} onKeyDown={e => e.key === "Enter" && add()} placeholder="Ex: Rodrimar" style={ip} /></Fl>
           <Fl label="Vencimento da minuta *"><input type="date" value={nf.data_vencimento} onChange={e => setNf(f => ({ ...f, data_vencimento: e.target.value }))} onKeyDown={e => e.key === "Enter" && add()} style={ip} /></Fl>
           <Fl label="Exportador"><input value={nf.exportador} onChange={e => setNf(f => ({ ...f, exportador: e.target.value }))} onKeyDown={e => e.key === "Enter" && add()} placeholder="Opcional" style={ip} /></Fl>
           <Fl label="Observação"><input value={nf.observacao} onChange={e => setNf(f => ({ ...f, observacao: e.target.value }))} onKeyDown={e => e.key === "Enter" && add()} placeholder="Opcional" style={ip} /></Fl>
@@ -432,7 +434,7 @@ function MinutasView({ minutas, userName, onChanged }: { minutas: Minuta[]; user
       {/* Filtros + busca */}
       <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginBottom: 14 }}>
         {chips.map(c => (<button key={c.key} onClick={() => setFilter(c.key)} style={{ padding: "6px 12px", borderRadius: 9, fontSize: 12, fontWeight: 800, border: filter === c.key ? `2px solid ${c.color}` : "2px solid #e4e4ec", background: filter === c.key ? c.bg : "#fff", color: filter === c.key ? c.color : "#bbb", cursor: "pointer", whiteSpace: "nowrap" }}>{c.label}</button>))}
-        <div style={{ position: "relative", marginLeft: "auto", minWidth: 200, flex: "0 1 260px" }}><div style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "#bbb" }}><ISearch /></div><input value={q} onChange={e => setQ(e.target.value)} placeholder="Buscar booking, exportador..." style={{ ...ip, padding: "8px 12px 8px 34px", fontSize: 13 }} /></div>
+        <div style={{ position: "relative", marginLeft: "auto", minWidth: 200, flex: "0 1 260px" }}><div style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "#bbb" }}><ISearch /></div><input value={q} onChange={e => setQ(e.target.value)} placeholder="Buscar booking, depot, exportador..." style={{ ...ip, padding: "8px 12px 8px 34px", fontSize: 13 }} /></div>
       </div>
 
       {/* Lista separada por dia */}
@@ -465,8 +467,9 @@ function MinutasView({ minutas, userName, onChanged }: { minutas: Minuta[]; user
       <Modal open={!!edit} onClose={() => setEdit(null)} title="✏️ Editar Minuta" w={480}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px 16px" }}>
           <Fl label="Booking *"><input value={ef.booking} onChange={e => setEf(f => ({ ...f, booking: e.target.value }))} style={{ ...ip, fontFamily: "var(--fm)", textTransform: "uppercase" }} /></Fl>
+          <Fl label="Depot"><input value={ef.depot} onChange={e => setEf(f => ({ ...f, depot: e.target.value }))} style={ip} /></Fl>
           <Fl label="Vencimento *"><input type="date" value={ef.data_vencimento} onChange={e => setEf(f => ({ ...f, data_vencimento: e.target.value }))} style={ip} /></Fl>
-          <Fl label="Exportador" span><input value={ef.exportador} onChange={e => setEf(f => ({ ...f, exportador: e.target.value }))} style={ip} /></Fl>
+          <Fl label="Exportador"><input value={ef.exportador} onChange={e => setEf(f => ({ ...f, exportador: e.target.value }))} style={ip} /></Fl>
           <Fl label="Observação" span><textarea value={ef.observacao} onChange={e => setEf(f => ({ ...f, observacao: e.target.value }))} rows={3} style={{ ...ip, resize: "vertical" }} /></Fl>
         </div>
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
@@ -625,7 +628,7 @@ export default function Page() {
     return [c.exportador, c.reserva, c.transportadora, c.referencia, c.comentarios].some(v => v?.toLowerCase().includes(q));
   });
 
-  const exportMinutasCSV = () => { const h = ["Booking","Vencimento","Exportador","Observação","Status","Cadastrado por","Resolvido por"]; const r = [...minutas].sort((a, b) => a.data_vencimento.localeCompare(b.data_vencimento)).map(x => [x.booking, x.data_vencimento, x.exportador, x.observacao, MIN_STATUS[minutaStatus(x)].label, x.created_by, x.resolved_by]); const csv = [h, ...r].map(x => x.map(c => `"${(c || "").toString().replace(/"/g, '""')}"`).join(",")).join("\n"); const b = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" }); const a = document.createElement("a"); a.href = URL.createObjectURL(b); a.download = `minutas-${today()}.csv`; a.click(); };
+  const exportMinutasCSV = () => { const h = ["Booking","Depot","Vencimento","Exportador","Observação","Status","Cadastrado por","Resolvido por"]; const r = [...minutas].sort((a, b) => a.data_vencimento.localeCompare(b.data_vencimento)).map(x => [x.booking, x.depot, x.data_vencimento, x.exportador, x.observacao, MIN_STATUS[minutaStatus(x)].label, x.created_by, x.resolved_by]); const csv = [h, ...r].map(x => x.map(c => `"${(c || "").toString().replace(/"/g, '""')}"`).join(",")).join("\n"); const b = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" }); const a = document.createElement("a"); a.href = URL.createObjectURL(b); a.download = `minutas-${today()}.csv`; a.click(); };
   const exportProcCSV = () => { const h = ["Etapa","Data Retirada","Data Carregamento","Exportador","Reserva","Qtd","Tipo","Transportadora","REF","Comentários"]; const r = cards.map(c => [STAGES.find(s => s.key === c.stage)?.label, c.data_retirada, c.data_carregamento, c.exportador, c.reserva, c.quantidade, c.tipo_container, c.transportadora, c.referencia, c.comentarios]); const csv = [h, ...r].map(x => x.map(c => `"${c || ""}"`).join(",")).join("\n"); const b = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" }); const a = document.createElement("a"); a.href = URL.createObjectURL(b); a.download = `interacao-${today()}.csv`; a.click(); };
   const exportCSV = () => view === "minutas" ? exportMinutasCSV() : exportProcCSV();
 
@@ -747,6 +750,7 @@ export default function Page() {
             {minDue.map(m => { const n = daysUntil(m.data_vencimento); const venc = n < 0; return (
               <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "10px 12px", borderRadius: 10, background: venc ? "#fef2f2" : "#fff7ed", border: `1px solid ${venc ? "#fca5a5" : "#fdba74"}`, borderLeft: `5px solid ${venc ? "#dc2626" : "#ea580c"}` }}>
                 <span style={{ fontSize: 15, fontWeight: 900, fontFamily: "var(--fm)" }}>{m.booking}</span>
+                {m.depot && <span style={{ fontSize: 12, fontWeight: 800, color: "#4338ca", background: "#eef2ff", border: "1px solid #c7d2fe", padding: "2px 8px", borderRadius: 6 }}>🏭 {m.depot}</span>}
                 {m.exportador && <span style={{ fontSize: 13, fontWeight: 700, color: "#555" }}>{m.exportador}</span>}
                 <span style={{ fontSize: 11, fontWeight: 900, color: venc ? "#dc2626" : "#ea580c" }}>{venc ? `🚨 VENCIDA · ${fd(m.data_vencimento)} · há ${Math.abs(n)}d` : "🔥 VENCE HOJE"}</span>
                 <button onClick={() => resolveMinuta(m)} style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 4, padding: "6px 10px", borderRadius: 8, fontSize: 12, fontWeight: 800, cursor: "pointer", background: "#ecfdf5", border: "1px solid #a7f3d0", color: "#059669" }}><ICheck />Resolvida</button>
