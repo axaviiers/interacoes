@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import {
   supabase,
   getProcesses,
@@ -252,6 +252,42 @@ function ClientsModal({ open, onClose, clients, userName, onChanged }: { open: b
 }
 
 // ══════════ CONTROLE DE MINUTA ══════════
+// Status calculado pela data: vira "vencida" sozinho quando passa do vencimento (e volta se a data for corrigida)
+type MinutaStatusView = "pendente" | "vencida" | "resolvida";
+const minutaStatus = (m: Minuta): MinutaStatusView => m.status === "resolvida" ? "resolvida" : daysUntil(m.data_vencimento) < 0 ? "vencida" : "pendente";
+const MIN_STATUS: Record<MinutaStatusView, { label: string; icon: string; color: string; bg: string; border: string }> = {
+  pendente: { label: "Pendente", icon: "⏳", color: "#0f766e", bg: "#f0fdfa", border: "#99f6e4" },
+  vencida: { label: "Vencida", icon: "🚨", color: "#fff", bg: "#dc2626", border: "#dc2626" },
+  resolvida: { label: "Resolvida", icon: "✅", color: "#059669", bg: "#ecfdf5", border: "#a7f3d0" },
+};
+const notifSupported = () => typeof window !== "undefined" && "Notification" in window;
+const notifPermission = (): NotificationPermission | "unsupported" => notifSupported() ? Notification.permission : "unsupported";
+async function showNotif(title: string, body: string) {
+  try {
+    const reg = "serviceWorker" in navigator ? await navigator.serviceWorker.getRegistration() : undefined;
+    const opts: any = { body, tag: "minutas", renotify: true, icon: "/icon-192.png", badge: "/icon-192.png", data: { url: "/?view=minutas" } };
+    if (reg) { await reg.showNotification(title, opts); return; }
+    new Notification(title, opts);
+  } catch (e) { console.error("Notificação:", e); }
+}
+async function askNotifPermission(): Promise<NotificationPermission | "unsupported"> {
+  if (!notifSupported()) return "unsupported";
+  try { return await Notification.requestPermission(); } catch { return Notification.permission; }
+}
+
+function NotifBanner() {
+  const [perm, setPerm] = useState<NotificationPermission | "unsupported">("default");
+  useEffect(() => { setPerm(notifPermission()); }, []);
+  if (perm === "granted" || perm === "unsupported") return null;
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "10px 14px", marginBottom: 14, borderRadius: 12, background: "#eff6ff", border: "2px solid #bfdbfe", color: "#1e40af", fontSize: 13, fontWeight: 700 }}>
+      <span style={{ fontSize: 18 }}>🔔</span>
+      {perm === "denied"
+        ? <span style={{ flex: 1 }}>As notificações estão bloqueadas neste navegador. Para receber aviso quando uma minuta vencer, clique no cadeado ao lado do endereço do site e permita <b>Notificações</b>.</span>
+        : <><span style={{ flex: 1 }}>Ative as notificações neste aparelho para ser avisada quando uma minuta vencer.</span><button onClick={async () => setPerm(await askNotifPermission())} style={{ padding: "7px 14px", borderRadius: 9, background: "#2563eb", border: "none", color: "#fff", fontSize: 12, fontWeight: 800, cursor: "pointer" }}>Ativar notificações</button></>}
+    </div>
+  );
+}
 const urgencyStyle = (d: string) => {
   const n = daysUntil(d);
   if (n < 0) return { color: "#dc2626", bg: "#fef2f2", border: "#fca5a5", tag: "VENCIDA", icon: "🚨" };
@@ -355,8 +391,9 @@ function MinutasView({ minutas, userName, onChanged }: { minutas: Minuta[]; user
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", padding: "12px 16px", background: done ? "#fafafa" : "#fff", border: "1px solid #e8e8ee", borderLeft: `6px solid ${done ? "#cbd5e1" : u.color}`, borderRadius: 12, opacity: done ? 0.75 : 1 }}>
         <span style={{ fontSize: 16, fontWeight: 900, fontFamily: "var(--fm)", color: done ? "#94a3b8" : "#1a1a2e", textDecoration: done ? "line-through" : "none", letterSpacing: "-.01em" }}>{m.booking}</span>
         {m.exportador && <span style={{ fontSize: 14, fontWeight: 800, color: "#444" }}>{m.exportador}</span>}
-        {!done && n < 0 && <span style={{ fontSize: 11, fontWeight: 900, fontFamily: "var(--fm)", color: "#fff", background: "#dc2626", padding: "3px 8px", borderRadius: 6, animation: "pulse 1.5s infinite" }}>⚠️ {fd(m.data_vencimento)} · {Math.abs(n)}d atrás</span>}
-        {done && <span style={{ fontSize: 11, fontWeight: 800, color: "#059669", background: "#ecfdf5", padding: "3px 8px", borderRadius: 6 }}>✅ venc. {fd(m.data_vencimento)} · resolvida {m.resolved_by ? `por ${m.resolved_by.split(" ")[0]}` : ""} {m.resolved_at ? ago(m.resolved_at) + " atrás" : ""}</span>}
+        {(() => { const st = minutaStatus(m); const c = MIN_STATUS[st]; return <span style={{ fontSize: 11, fontWeight: 900, color: c.color, background: c.bg, border: `1px solid ${c.border}`, padding: "3px 8px", borderRadius: 6, letterSpacing: ".03em", textTransform: "uppercase", animation: st === "vencida" ? "pulse 1.5s infinite" : "none", whiteSpace: "nowrap" }}>{c.icon} {c.label}</span>; })()}
+        {!done && n < 0 && <span style={{ fontSize: 11, fontWeight: 800, fontFamily: "var(--fm)", color: "#dc2626" }}>venceu {fd(m.data_vencimento)} · há {Math.abs(n)} dia{Math.abs(n) !== 1 ? "s" : ""}</span>}
+        {done && <span style={{ fontSize: 11, fontWeight: 700, color: "#64748b" }}>venc. {fd(m.data_vencimento)}{m.resolved_by ? ` · por ${m.resolved_by.split(" ")[0]}` : ""}{m.resolved_at ? ` · ${ago(m.resolved_at)} atrás` : ""}</span>}
         {m.observacao && <span style={{ fontSize: 12, color: "#888", fontWeight: 600, fontStyle: "italic", flexBasis: "100%", order: 10 }}>💬 {m.observacao}</span>}
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
           {m.created_by && <span className="desk" style={{ fontSize: 11, color: "#aaa", fontWeight: 700, marginRight: 4 }}>{m.created_by.split(" ")[0]} · {ago(m.created_at)}</span>}
@@ -370,7 +407,7 @@ function MinutasView({ minutas, userName, onChanged }: { minutas: Minuta[]; user
 
   const canAdd = !!nf.booking.trim() && !!nf.data_vencimento && !busy;
   const chips: { key: typeof filter; label: string; color: string; bg: string }[] = [
-    { key: "todas", label: `Todas pendentes (${pend.length})`, color: "#0d9488", bg: "#f0fdfa" },
+    { key: "todas", label: `Em aberto (${pend.length})`, color: "#0d9488", bg: "#f0fdfa" },
     { key: "vencidas", label: `🚨 Vencidas (${cVenc})`, color: "#dc2626", bg: "#fef2f2" },
     { key: "hoje", label: `🔥 Hoje (${cHoje})`, color: "#ef4444", bg: "#fef2f2" },
     { key: "amanha", label: `⏰ Amanhã (${cAmanha})`, color: "#ea580c", bg: "#fff7ed" },
@@ -379,6 +416,7 @@ function MinutasView({ minutas, userName, onChanged }: { minutas: Minuta[]; user
 
   return (
     <div style={{ padding: "12px 20px 32px" }}>
+      <NotifBanner />
       {/* Cadastro rápido */}
       <div style={{ background: "#fff", border: "2px solid #ccfbf1", borderRadius: 16, padding: 16, marginBottom: 14 }}>
         <div style={{ fontSize: 12, fontWeight: 900, color: "#0f766e", textTransform: "uppercase", letterSpacing: ".06em", marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}><IDoc />Cadastrar minuta</div>
@@ -467,7 +505,10 @@ export default function Page() {
   const [showLog, setShowLog] = useState(false);
   const [mobileMenu, setMobileMenu] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [, setTick] = useState(0);
+  const [tick, setTick] = useState(0);
+  const [showMinAlert, setShowMinAlert] = useState(false);
+  const alertShownRef = useRef(false);
+  const notifiedRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (!user) return; let m = true;
@@ -484,7 +525,55 @@ export default function Page() {
   const reloadClients = () => { getClientSpecifics().then(setClientSpecs).catch(console.error); };
   const reloadMinutas = () => { getMinutas().then(setMinutas).catch(console.error); };
   const minPend = minutas.filter(x => x.status === "pendente");
-  const minAlert = minPend.filter(x => daysUntil(x.data_vencimento) <= 0).length;
+  const minDue = minPend.filter(x => daysUntil(x.data_vencimento) <= 0).sort((a, b) => a.data_vencimento.localeCompare(b.data_vencimento));
+  const minAlert = minDue.length;
+  const minVencidas = minDue.filter(x => daysUntil(x.data_vencimento) < 0);
+  const minHoje = minDue.filter(x => daysUntil(x.data_vencimento) === 0);
+
+  const resolveMinuta = async (m: Minuta) => {
+    if (!user) return;
+    try { await updateMinuta(m.id, { status: "resolvida", resolved_at: new Date().toISOString(), resolved_by: user.name }); await addActivity(`✅ Minuta resolvida: ${m.booking}`, user.name); reloadMinutas(); } catch (e) { console.error(e); }
+  };
+
+  // Service worker (notificações + app instalável) e abrir direto em Minutas pela notificação
+  useEffect(() => {
+    try { if (new URLSearchParams(window.location.search).get("view") === "minutas") setView("minutas"); } catch {}
+    if (!("serviceWorker" in navigator)) return;
+    navigator.serviceWorker.register("/sw.js").catch(console.error);
+    const onMsg = (e: MessageEvent) => { if (e.data?.type === "open-minutas") setView("minutas"); };
+    navigator.serviceWorker.addEventListener("message", onMsg);
+    return () => navigator.serviceWorker.removeEventListener("message", onMsg);
+  }, []);
+
+  // Aviso ao entrar: uma vez por login, se houver minuta vencida ou vencendo hoje
+  useEffect(() => {
+    if (!user) { alertShownRef.current = false; return; }
+    if (loading || alertShownRef.current) return;
+    alertShownRef.current = true;
+    if (minAlert > 0) setShowMinAlert(true);
+  }, [user, loading, minAlert]);
+
+  // Notificação no aparelho: 1x por dia por minuta (vencida ou vencendo hoje). Checa a cada 30s, então pega a virada da meia-noite.
+  useEffect(() => {
+    if (!user || loading || notifPermission() !== "granted") return;
+    const t = today();
+    const fresh = minDue.filter(m => {
+      const k = `minnotif:${m.id}:${t}:${daysUntil(m.data_vencimento) < 0 ? "v" : "h"}`;
+      if (notifiedRef.current.has(k)) return false;
+      notifiedRef.current.add(k);
+      try { if (localStorage.getItem(k)) return false; localStorage.setItem(k, "1"); } catch {}
+      return true;
+    });
+    if (fresh.length === 0) return;
+    const v = fresh.filter(m => daysUntil(m.data_vencimento) < 0); const h = fresh.filter(m => daysUntil(m.data_vencimento) === 0);
+    if (fresh.length === 1) {
+      const m = fresh[0];
+      showNotif(v.length ? `🚨 Minuta vencida: ${m.booking}` : `🔥 Minuta vence hoje: ${m.booking}`, `${m.exportador ? m.exportador + " · " : ""}vencimento ${ff(m.data_vencimento)}`);
+    } else {
+      const parts = [v.length ? `${v.length} vencida${v.length > 1 ? "s" : ""}` : "", h.length ? `${h.length} vencendo hoje` : ""].filter(Boolean).join(" e ");
+      showNotif(`📄 Minutas: ${parts}`, fresh.map(m => m.booking).join(", "));
+    }
+  }, [user, loading, minutas, tick]);
 
   // Cliente que bate com o exportador digitado no form (lookup local)
   const matchedClient = useMemo(() => {
@@ -536,7 +625,7 @@ export default function Page() {
     return [c.exportador, c.reserva, c.transportadora, c.referencia, c.comentarios].some(v => v?.toLowerCase().includes(q));
   });
 
-  const exportMinutasCSV = () => { const h = ["Booking","Vencimento","Exportador","Observação","Status","Cadastrado por","Resolvido por"]; const r = [...minutas].sort((a, b) => a.data_vencimento.localeCompare(b.data_vencimento)).map(x => [x.booking, x.data_vencimento, x.exportador, x.observacao, x.status, x.created_by, x.resolved_by]); const csv = [h, ...r].map(x => x.map(c => `"${(c || "").toString().replace(/"/g, '""')}"`).join(",")).join("\n"); const b = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" }); const a = document.createElement("a"); a.href = URL.createObjectURL(b); a.download = `minutas-${today()}.csv`; a.click(); };
+  const exportMinutasCSV = () => { const h = ["Booking","Vencimento","Exportador","Observação","Status","Cadastrado por","Resolvido por"]; const r = [...minutas].sort((a, b) => a.data_vencimento.localeCompare(b.data_vencimento)).map(x => [x.booking, x.data_vencimento, x.exportador, x.observacao, MIN_STATUS[minutaStatus(x)].label, x.created_by, x.resolved_by]); const csv = [h, ...r].map(x => x.map(c => `"${(c || "").toString().replace(/"/g, '""')}"`).join(",")).join("\n"); const b = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" }); const a = document.createElement("a"); a.href = URL.createObjectURL(b); a.download = `minutas-${today()}.csv`; a.click(); };
   const exportProcCSV = () => { const h = ["Etapa","Data Retirada","Data Carregamento","Exportador","Reserva","Qtd","Tipo","Transportadora","REF","Comentários"]; const r = cards.map(c => [STAGES.find(s => s.key === c.stage)?.label, c.data_retirada, c.data_carregamento, c.exportador, c.reserva, c.quantidade, c.tipo_container, c.transportadora, c.referencia, c.comentarios]); const csv = [h, ...r].map(x => x.map(c => `"${c || ""}"`).join(",")).join("\n"); const b = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" }); const a = document.createElement("a"); a.href = URL.createObjectURL(b); a.download = `interacao-${today()}.csv`; a.click(); };
   const exportCSV = () => view === "minutas" ? exportMinutasCSV() : exportProcCSV();
 
@@ -554,7 +643,7 @@ export default function Page() {
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <div style={{ width: 40, height: 40, borderRadius: 12, background: "linear-gradient(135deg,#6366f1,#a855f7)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 18, boxShadow: "0 4px 16px rgba(99,102,241,.25)" }}>📦</div>
-            <div><h1 style={{ fontSize: 20, fontWeight: 900, letterSpacing: "-.03em", lineHeight: 1 }}>Inter<span style={{ color: "#6366f1" }}>ação</span></h1><p style={{ fontSize: 11, color: "#888", fontWeight: 700 }}>{view === "minutas" ? <>{minPend.length} minuta{minPend.length !== 1 ? "s" : ""} pendente{minPend.length !== 1 ? "s" : ""}{minAlert > 0 && <span style={{ color: "#dc2626", fontWeight: 900 }}> · ⚠️ {minAlert} vencendo/vencida{minAlert > 1 ? "s" : ""}</span>}</> : <>{cards.length} processos · {totalC} cnt{urgentCount > 0 && <span style={{ color: "#dc2626", fontWeight: 900 }}> · ⚠️ {urgentCount} urgente{urgentCount > 1 ? "s" : ""}</span>}</>}</p></div>
+            <div><h1 style={{ fontSize: 20, fontWeight: 900, letterSpacing: "-.03em", lineHeight: 1 }}>Inter<span style={{ color: "#6366f1" }}>ação</span></h1><p style={{ fontSize: 11, color: "#888", fontWeight: 700 }}>{view === "minutas" ? <>{minPend.length} minuta{minPend.length !== 1 ? "s" : ""} em aberto{minAlert > 0 && <span style={{ color: "#dc2626", fontWeight: 900 }}> · ⚠️ {minAlert} vencendo/vencida{minAlert > 1 ? "s" : ""}</span>}</> : <>{cards.length} processos · {totalC} cnt{urgentCount > 0 && <span style={{ color: "#dc2626", fontWeight: 900 }}> · ⚠️ {urgentCount} urgente{urgentCount > 1 ? "s" : ""}</span>}</>}</p></div>
           </div>
           <div className="desk" style={{ display: "flex", gap: 8, alignItems: "center" }}>
             {view === "liberacao" && <div style={{ position: "relative" }}><div style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "#bbb" }}><ISearch /></div><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar exportador, reserva..." style={{ ...ip, width: 280, paddingLeft: 34, fontSize: 13, padding: "8px 12px 8px 34px", borderRadius: 10, background: "#f7f7fb", border: "2px solid #e8e8ee" }} /></div>}
@@ -642,6 +731,33 @@ export default function Page() {
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
           <button onClick={() => setDeleteConfirm(null)} style={{ padding: "10px 20px", borderRadius: 10, background: "#fff", border: "2px solid #e4e4ec", color: "#888", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Cancelar</button>
           <button onClick={() => deleteConfirm && handleDelete(deleteConfirm)} style={{ padding: "10px 24px", borderRadius: 10, background: "#ef4444", border: "none", color: "#fff", fontSize: 13, fontWeight: 800, cursor: "pointer" }}>Excluir</button>
+        </div>
+      </Modal>
+
+      <Modal open={showMinAlert} onClose={() => setShowMinAlert(false)} title="📄 Atenção: minutas" w={560}>
+        {minAlert === 0 ? (
+          <div style={{ textAlign: "center", padding: "20px 0", color: "#059669", fontWeight: 800 }}>✅ Tudo resolvido por aqui!</div>
+        ) : (<>
+          <p style={{ fontSize: 13, color: "#555", fontWeight: 600, marginBottom: 14 }}>
+            {minVencidas.length > 0 && <><b style={{ color: "#dc2626" }}>{minVencidas.length} vencida{minVencidas.length > 1 ? "s" : ""}</b>{minHoje.length > 0 ? " e " : ""}</>}
+            {minHoje.length > 0 && <b style={{ color: "#ea580c" }}>{minHoje.length} vencendo hoje</b>}
+            . Já resolveu alguma? Marque aqui mesmo.
+          </p>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: "50vh", overflow: "auto" }}>
+            {minDue.map(m => { const n = daysUntil(m.data_vencimento); const venc = n < 0; return (
+              <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "10px 12px", borderRadius: 10, background: venc ? "#fef2f2" : "#fff7ed", border: `1px solid ${venc ? "#fca5a5" : "#fdba74"}`, borderLeft: `5px solid ${venc ? "#dc2626" : "#ea580c"}` }}>
+                <span style={{ fontSize: 15, fontWeight: 900, fontFamily: "var(--fm)" }}>{m.booking}</span>
+                {m.exportador && <span style={{ fontSize: 13, fontWeight: 700, color: "#555" }}>{m.exportador}</span>}
+                <span style={{ fontSize: 11, fontWeight: 900, color: venc ? "#dc2626" : "#ea580c" }}>{venc ? `🚨 VENCIDA · ${fd(m.data_vencimento)} · há ${Math.abs(n)}d` : "🔥 VENCE HOJE"}</span>
+                <button onClick={() => resolveMinuta(m)} style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 4, padding: "6px 10px", borderRadius: 8, fontSize: 12, fontWeight: 800, cursor: "pointer", background: "#ecfdf5", border: "1px solid #a7f3d0", color: "#059669" }}><ICheck />Resolvida</button>
+              </div>
+            ); })}
+          </div>
+        </>)}
+        {notifPermission() === "default" && <div style={{ marginTop: 14, display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", borderRadius: 10, background: "#eff6ff", border: "1px solid #bfdbfe", fontSize: 12, fontWeight: 700, color: "#1e40af" }}><span style={{ flex: 1 }}>🔔 Quer ser avisada no aparelho quando uma minuta vencer?</span><button onClick={async () => { await askNotifPermission(); setTick(t => t + 1); }} style={{ padding: "6px 12px", borderRadius: 8, background: "#2563eb", border: "none", color: "#fff", fontSize: 12, fontWeight: 800, cursor: "pointer" }}>Ativar</button></div>}
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
+          <button onClick={() => setShowMinAlert(false)} style={{ padding: "10px 20px", borderRadius: 10, background: "#fff", border: "2px solid #e4e4ec", color: "#888", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Fechar</button>
+          <button onClick={() => { setView("minutas"); setShowMinAlert(false); }} style={{ padding: "10px 22px", borderRadius: 10, background: "linear-gradient(135deg,#0d9488,#14b8a6)", border: "none", color: "#fff", fontSize: 13, fontWeight: 800, cursor: "pointer" }}>Ver minutas</button>
         </div>
       </Modal>
 
